@@ -1,0 +1,224 @@
+name: "Nightly Kong Mesh on ECS"
+
+on:
+  workflow_dispatch: {}
+  schedule:
+    - cron: "25 4 * * *"
+  push:
+    branches:
+      - main
+
+env:
+  stack-prefix: ecs-ci
+  unique-id: ${{ github.run_number }}_${{ github.run_attempt}}
+
+permissions:
+  id-token: write
+  contents: read
+
+# In the AWS account, GitHub is registered as an OIDC provider.
+# There is also an IAM role that trusts tokens issued by this provider to this
+# main branch in this repository. The role has permissions necessary to create
+# and delete the stacks in this repo (see /policy.json).
+#
+# When the GitHub workflow runs, it is issued such an OIDC token by the GitHub OIDC
+# provider and uses the `configure-aws-credentials` action to obtain short-lived
+# credentials and then assume the aforementioned IAM role.
+jobs:
+  test:
+    name: "Test Kong Mesh on ECS"
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v2
+      - name: Configure AWS Credentials
+        uses: aws-actions/configure-aws-credentials@v1
+        with:
+          role-to-assume: arn:aws:iam::${{ secrets.NIGHTLY_AWS_ACCOUNT_ID }}:role/ecs-ci
+          aws-region: us-east-2
+      - name: Install kumactl
+        run: |
+          curl -L https://docs.konghq.com/mesh/installer.sh | sh -
+          cp kong-mesh-*/bin/kumactl /usr/local/bin/kumactl
+      - name: Provision VPC
+        run: |
+          aws cloudformation deploy \
+            --capabilities CAPABILITY_IAM \
+            --stack-name ${{ env.stack-prefix}}-vpc \
+            --template-file deploy/vpc.yaml
+      - name: Provision control plane
+        id: cp
+        env:
+          license: ${{ secrets.KONG_MESH_LICENSE_JSON }}
+        run: |
+          LICENSE_SECRET=$(
+            aws secretsmanager create-secret \
+                --name ${{ env.stack-prefix }}/KongMeshLicense/${{ env.unique-id }} \
+                --description "Secret containing Kong Mesh license" \
+                --secret-string "${license}" \
+            | jq -r .ARN
+          )
+
+          CP_ADDR=$(
+            aws cloudformation describe-stacks --stack-name ${{ env.stack-prefix}}-vpc \
+            | jq -r '.Stacks[0].Outputs[] | select(.OutputKey == "ExternalCPAddress") | .OutputValue'
+          )
+
+          kumactl generate tls-certificate --type=server --hostname ${CP_ADDR} --hostname controlplane.kongmesh
+          TLS_KEY=$(
+            aws secretsmanager create-secret \
+              --name ${{ env.stack-prefix }}/CPTLSKey/${{ env.unique-id }} \
+              --description "Secret containing TLS private key for serving control plane traffic" \
+              --secret-string file://key.pem \
+            | jq -r .ARN
+          )
+          TLS_CERT=$(
+            aws secretsmanager create-secret \
+              --name ${{ env.stack-prefix }}/CPTLSCert/${{ env.unique-id }} \
+              --description "Secret containing TLS certificate for serving control plane traffic" \
+              --secret-string file://cert.pem \
+            | jq -r .ARN
+          )
+
+          aws cloudformation deploy \
+              --capabilities CAPABILITY_IAM \
+              --stack-name ${{ env.stack-prefix}}-cp \
+              --parameter-overrides VPCStackName=${{ env.stack-prefix }}-vpc \
+                LicenseSecret=${LICENSE_SECRET} \
+                ServerKeySecret=${TLS_KEY} \
+                ServerCertSecret=${TLS_CERT} \
+              --template-file deploy/controlplane.yaml
+
+          echo "::set-output name=license-secret::${LICENSE_SECRET}"
+          echo "::set-output name=cp-addr::${CP_ADDR}"
+          echo "::set-output name=tls-key::${TLS_KEY}"
+          echo "::set-output name=tls-cert::${TLS_CERT}"
+      - name: Provision controller
+        id: controller
+        run: |
+          TOKEN_SECRET_ARN=$(
+            aws cloudformation describe-stacks --stack-name ${{ env.stack-prefix }}-cp \
+            | jq -r '.Stacks[0].Outputs[] | select(.OutputKey == "APITokenSecret") | .OutputValue'
+          )
+          TOKEN=$(
+            aws secretsmanager get-secret-value --secret-id ${TOKEN_SECRET_ARN} \
+            | jq -r .SecretString
+          )
+
+          echo "Setting up kumactl with ECS control plane"
+
+          # While testing it seems to be possible for a connection to succeed
+          # with netcat then fail with kumactl, so just make sure enough have
+          # worked before running `kumactl`
+          echo "Ensuring open TCP connection to control plane listener..."
+          for i in {1..5}; do
+            netcat -w 180 -z ${{ steps.cp.outputs.cp-addr }} 5682 || true
+          done
+
+          kumactl config control-planes add \
+            --name=ecs \
+            --address=https://${{ steps.cp.outputs.cp-addr }}:5682 \
+            --auth-type=tokens \
+            --auth-conf token=${TOKEN} \
+            --ca-cert-file cert.pem
+
+          USER_TOKEN=$(
+            kumactl generate user-token \
+              --name ecs-controller --group mesh-system:admin --valid-for 8766h
+          )
+          USER_TOKEN_SECRET=$(
+            aws secretsmanager create-secret \
+              --name ${{ env.stack-prefix }}/ECSToken/${{ env.unique-id }} \
+              --description "Secret containing Kuma API token for us with ECS controller" \
+              --secret-string "${USER_TOKEN}" \
+            | jq -r .ARN
+          )
+
+          aws cloudformation deploy \
+            --capabilities CAPABILITY_IAM \
+            --stack-name ${{ env.stack-prefix}}-controller \
+            --parameter-overrides \
+              VPCStackName=${{ env.stack-prefix}}-vpc \
+              CPStackName=${{ env.stack-prefix}}-cp \
+              APITokenSecret=${USER_TOKEN_SECRET} \
+            --template-file deploy/controller.yaml
+
+          echo "::set-output name=user-token-secret::${USER_TOKEN_SECRET}"
+      - name: Provision counter-demo
+        run: |
+          aws cloudformation deploy \
+            --capabilities CAPABILITY_IAM \
+            --stack-name ${{ env.stack-prefix }}-redis \
+            --parameter-overrides \
+              VPCStackName=${{ env.stack-prefix }}-vpc \
+              CPStackName=${{ env.stack-prefix }}-cp \
+            --template-file deploy/counter-demo/redis.yaml
+
+          aws cloudformation deploy \
+            --capabilities CAPABILITY_IAM \
+            --stack-name ${{ env.stack-prefix }}-demo-app \
+            --parameter-overrides \
+              VPCStackName=${{ env.stack-prefix }}-vpc \
+              CPStackName=${{ env.stack-prefix }}-cp \
+            --template-file deploy/counter-demo/demo-app.yaml
+      - name: Test that Dataplanes exist
+        run: |
+          test $(kumactl get dataplanes -o json | jq '.items | length') -eq 2
+      - name: Test counter-demo
+        run: |
+          sudo apt-get install httpie
+
+          echo "Ensuring open TCP connection to demo app listener..."
+          for i in {1..5}; do
+            netcat -w 180 -z ${{ steps.cp.outputs.cp-addr }} 80 || true
+          done
+
+          COUNTER=$(http --check-status GET http://${{ steps.cp.outputs.cp-addr }}/counter | jq -r .counter)
+          NEXT_COUNTER=$(http --check-status POST http://${{ steps.cp.outputs.cp-addr }}/increment | jq -r .counter)
+          test $((NEXT_COUNTER - COUNTER)) -eq 1
+
+  teardown:
+    needs: test
+    name: "Cleanup after successful test"
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v2
+      - name: Configure AWS Credentials
+        uses: aws-actions/configure-aws-credentials@v1
+        with:
+          role-to-assume: arn:aws:iam::${{ secrets.NIGHTLY_AWS_ACCOUNT_ID }}:role/ecs-ci
+          aws-region: us-east-2
+      - name: Deprovision counter-demo & controller
+        run: |
+          aws cloudformation delete-stack \
+            --stack-name ${{ env.stack-prefix}}-demo-app
+          aws cloudformation delete-stack \
+            --stack-name ${{ env.stack-prefix}}-redis
+          aws cloudformation delete-stack \
+            --stack-name ${{ env.stack-prefix}}-controller
+
+          aws cloudformation wait stack-delete-complete \
+            --stack-name ${{ env.stack-prefix}}-demo-app
+          aws cloudformation wait stack-delete-complete \
+            --stack-name ${{ env.stack-prefix}}-redis
+          aws cloudformation wait stack-delete-complete \
+            --stack-name ${{ env.stack-prefix}}-controller
+
+          aws secretsmanager delete-secret --secret-id ${{ needs.test.outputs.user-token-secret }}
+      - name: Deprovision control plane
+        run: |
+          aws cloudformation delete-stack \
+            --stack-name ${{ env.stack-prefix}}-cp
+          aws cloudformation wait stack-delete-complete \
+            --stack-name ${{ env.stack-prefix}}-cp
+
+          aws secretsmanager delete-secret --secret-id ${{ needs.test.outputs.tls-key }}
+          aws secretsmanager delete-secret --secret-id ${{ needs.test.outputs.tls-cert }}
+          aws secretsmanager delete-secret --secret-id ${{ needs.test.outputs.license-secret }}
+      - name: Deprovision VPC
+        run: |
+          aws cloudformation delete-stack \
+            --stack-name ${{ env.stack-prefix}}-vpc
+          aws cloudformation wait stack-delete-complete \
+            --stack-name ${{ env.stack-prefix}}-vpc

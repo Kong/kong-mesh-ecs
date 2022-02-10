@@ -148,7 +148,7 @@ force the browser to accept the self-signed certificate).
 
 ### ECS controller
 
-The ECS controller needs a token for the Kuma API. We could use the admin token
+The ECS controller needs a token for the Kong Mesh API. We could use the admin token
 but it's better to provision a separate [user
 token](https://kuma.io/docs/1.4.x/security/api-server-auth/#user-token) and give it the admin role.
 
@@ -157,7 +157,7 @@ ECS_TOKEN=$(kumactl generate user-token \
   --name ecs-controller --group mesh-system:admin --valid-for 8766h)
 ECS_TOKEN_SECRET=$(aws secretsmanager create-secret \
   --name ecs-demo/ECSToken \
-  --description "Secret containing Kuma API token for us with ECS controller" \
+  --description "Secret containing Kong Mesh API token for us with ECS controller" \
   --secret-string ${ECS_TOKEN} \
   | jq -r .ARN)
 ```
@@ -229,11 +229,11 @@ After we have accessed the secret, we can remove the final two containers in our
 
 ## Usage
 
-When running Kuma on ECS + Fargate, you'll need to list the services in the mesh
-that your task. These are called
+When running Kong Mesh on ECS + Fargate, you'll need to list the services in the mesh
+that your task communicates with. These are called
 [_outbounds_](https://kuma.io/docs/1.4.x/documentation/dps-and-data-model/#dataplane-specification).
 
-That entails editing the `Dataplane` template in the CloudFormation template
+This entails editing the `Dataplane` template in the CloudFormation template
 used to deploy your application.
 
 We can see this in the [`demo-app`
@@ -246,7 +246,7 @@ template parameter `DPTemplate`](./deploy/counter-demo/demo-app.yaml):
             kuma.io/service: redis
 ```
 
-Here we're telling Kuma that our `demo-app` will communicate with the `redis`
+Here we're telling Kong Mesh that our `demo-app` will communicate with the `redis`
 service. The sidecar is then configured to route requests to `redis:6379` to our
 `redis` service.
 

@@ -28,6 +28,11 @@ jobs:
   test:
     name: "Test Kong Mesh on ECS"
     runs-on: ubuntu-latest
+    outputs:
+      license-secret: ${{ steps.cp.outputs.license-secret }}
+      tls-key-secret: ${{ steps.cp.outputs.tls-key-secret }}
+      tls-cert-secret: ${{ steps.cp.outputs.tls-cert-secret }}
+      user-token-secret: ${{ steps.controller.outputs.user-token-secret }}
     steps:
       - name: Checkout
         uses: actions/checkout@v2
@@ -91,8 +96,8 @@ jobs:
 
           echo "::set-output name=license-secret::${LICENSE_SECRET}"
           echo "::set-output name=cp-addr::${CP_ADDR}"
-          echo "::set-output name=tls-key::${TLS_KEY}"
-          echo "::set-output name=tls-cert::${TLS_CERT}"
+          echo "::set-output name=tls-key-secret::${TLS_KEY}"
+          echo "::set-output name=tls-cert-secret::${TLS_CERT}"
       - name: Provision controller
         id: controller
         run: |
@@ -213,8 +218,8 @@ jobs:
           aws cloudformation wait stack-delete-complete \
             --stack-name ${{ env.stack-prefix}}-cp
 
-          aws secretsmanager delete-secret --secret-id ${{ needs.test.outputs.tls-key }}
-          aws secretsmanager delete-secret --secret-id ${{ needs.test.outputs.tls-cert }}
+          aws secretsmanager delete-secret --secret-id ${{ needs.test.outputs.tls-key-secret }}
+          aws secretsmanager delete-secret --secret-id ${{ needs.test.outputs.tls-cert-secret }}
           aws secretsmanager delete-secret --secret-id ${{ needs.test.outputs.license-secret }}
       - name: Deprovision VPC
         run: |

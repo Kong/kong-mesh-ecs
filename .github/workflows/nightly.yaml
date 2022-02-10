@@ -89,15 +89,15 @@ jobs:
               --capabilities CAPABILITY_IAM \
               --stack-name ${{ env.stack-prefix}}-cp \
               --parameter-overrides VPCStackName=${{ env.stack-prefix }}-vpc \
-                LicenseSecret=$(jq .ARN <<< $LICENSE_SECRET) \
-                ServerKeySecret=$(jq .ARN <<< $TLS_KEY) \
-                ServerCertSecret=$(jq .ARN <<< $TLS_CERT) \
+                LicenseSecret=$(jq -r .ARN <<< $LICENSE_SECRET) \
+                ServerKeySecret=$(jq -r .ARN <<< $TLS_KEY) \
+                ServerCertSecret=$(jq -r .ARN <<< $TLS_CERT) \
               --template-file deploy/controlplane.yaml
 
-          echo "::set-output name=license-secret::$(jq .Name <<< $LICENSE_SECRET)"
+          echo "::set-output name=license-secret::$(jq -r .Name <<< $LICENSE_SECRET)"
           echo "::set-output name=cp-addr::${CP_ADDR}"
-          echo "::set-output name=tls-key-secret::$(jq .Name <<< $TLS_KEY)"
-          echo "::set-output name=tls-cert-secret::$(jq .Name <<< $TLS_CERT)"
+          echo "::set-output name=tls-key-secret::$(jq -r .Name <<< $TLS_KEY)"
+          echo "::set-output name=tls-cert-secret::$(jq -r .Name <<< $TLS_CERT)"
       - name: Provision controller
         id: controller
         run: |
@@ -144,10 +144,10 @@ jobs:
             --parameter-overrides \
               VPCStackName=${{ env.stack-prefix}}-vpc \
               CPStackName=${{ env.stack-prefix}}-cp \
-              APITokenSecret=$(jq .ARN <<< $USER_TOKEN_SECRET) \
+              APITokenSecret=$(jq -r .ARN <<< $USER_TOKEN_SECRET) \
             --template-file deploy/controller.yaml
 
-          echo "::set-output name=user-token-secret::$(jq .Name <<< $USER_TOKEN_SECRET)"
+          echo "::set-output name=user-token-secret::$(jq -r .Name <<< $USER_TOKEN_SECRET)"
       - name: Provision counter-demo
         run: |
           aws cloudformation deploy \

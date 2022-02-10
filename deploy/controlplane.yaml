@@ -1,0 +1,407 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: Kong Mesh Control Plane on ECS
+Parameters:
+  VPCStackName:
+    Type: String
+    Description:
+      Name of the parent Fargate networking stack that you created. Necessary
+      to locate and reference resources created by that stack.
+  Image:
+    Type: String
+    Default: "docker.io/kong/kuma-cp:1.5.1"
+    Description: Name of the control plane docker image
+  AllowedCidr:
+    Type: String
+    Default: "10.0.0.0/8"
+    Description: CIDR used to restrict control plane access
+  DesiredCount:
+    Type: Number
+    Default: 1
+    Description: Number of CP tasks to run
+
+  LicenseSecret:
+    Type: String
+    Description: Secret ARN holding a Kong Mesh license
+
+  ServerCertSecret:
+    Type: String
+    Description: ARN of an AWS secret containing a TLS certificate for serving control plane traffic
+  ServerKeySecret:
+    Type: String
+    Description: ARN of an AWS secret containing a TLS private key for serving control plane traffic
+
+Resources:
+  # Database
+  DBSubnetGroup:
+    Type: "AWS::RDS::DBSubnetGroup"
+    Properties:
+      DBSubnetGroupDescription: !Ref AWS::StackName
+      SubnetIds:
+        - Fn::ImportValue: !Join [":", [!Ref VPCStackName, PublicSubnet]]
+        - Fn::ImportValue: !Join [":", [!Ref VPCStackName, PublicSubnet2]]
+
+  CPDatabasePassword:
+    Type: AWS::SecretsManager::Secret
+    Properties:
+      # Using the StackId gives us a randomness to the name while allowing us to
+      # prefix it with a path
+      Name:
+        !Join [
+          "/",
+          [
+            !Ref AWS::StackName,
+            "CPDatabasePassword",
+            !Select [2, !Split ["/", !Ref AWS::StackId]],
+          ],
+        ]
+      Description: Secret containing the password for the Kong Mesh CP DB backend
+      GenerateSecretString:
+        ExcludeCharacters: >-
+          '"@/\
+        PasswordLength: 16
+
+  CPDatabase:
+    Type: AWS::RDS::DBInstance
+    Properties:
+      DBName: kongmesh
+      Engine: postgres
+      MasterUsername: kongmesh
+      MasterUserPassword:
+        !Join [
+          "",
+          [
+            "{{resolve:secretsmanager:",
+            !Ref CPDatabasePassword,
+            ":SecretString}}",
+          ],
+        ]
+      AllocatedStorage: 50
+      DBInstanceClass: db.m5.large
+      DBSubnetGroupName: !Ref DBSubnetGroup
+      VPCSecurityGroups:
+        - !Ref CPSecurityGroup
+
+  # We use ECS service discovery to let the mesh data plane proxies
+  # communicate with the control plane
+  DiscoveryServiceCP:
+    Type: AWS::ServiceDiscovery::Service
+    Properties:
+      Description: Discovery Service for Kong Mesh CP
+      DnsConfig:
+        RoutingPolicy: MULTIVALUE
+        DnsRecords:
+          - TTL: 60
+            Type: A
+          - TTL: 60
+            Type: SRV
+      HealthCheckCustomConfig:
+        FailureThreshold: 1
+      Name: controlplane
+      NamespaceId:
+        Fn::ImportValue: !Join [":", [!Ref VPCStackName, PrivateNamespace]]
+
+  # Our NLB exposes the Kuma API on port 5682
+  LoadBalancerTargetAPITLS:
+    Type: AWS::ElasticLoadBalancingV2::TargetGroup
+    Properties:
+      TargetType: ip
+      Port: 5682
+      Protocol: TCP
+      VpcId:
+        Fn::ImportValue: !Join [":", [!Ref VPCStackName, VPCId]]
+
+  LoadBalancerListenerAPITLS:
+    Type: AWS::ElasticLoadBalancingV2::Listener
+    Properties:
+      LoadBalancerArn:
+        Fn::ImportValue: !Join [":", [!Ref VPCStackName, LoadBalancer]]
+      Port: 5682
+      Protocol: TCP
+      DefaultActions:
+        - Type: forward
+          ForwardConfig:
+            TargetGroups:
+              - TargetGroupArn: !Ref LoadBalancerTargetAPITLS
+
+  # The control plane task populates this secret with the admin token
+  APITokenSecret:
+    Type: AWS::SecretsManager::Secret
+    Properties:
+      Name:
+        !Join [
+          "/",
+          [
+            !Ref AWS::StackName,
+            "APITokenSecret",
+            !Select [2, !Split ["/", !Ref AWS::StackId]],
+          ],
+        ]
+      Description: Secret containing an admin Kuma API Token
+
+  # IAM roles for the control plane task
+  CPTaskExecutionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: [ecs-tasks.amazonaws.com]
+            Action: [sts:AssumeRole]
+      Policies:
+        - PolicyName: get-license-secret
+          PolicyDocument:
+            Statement:
+              - Effect: Allow
+                Action:
+                  - secretsmanager:GetSecretValue
+                Resource:
+                  - !Ref LicenseSecret
+                  - !Ref CPDatabasePassword
+                  - !Ref ServerCertSecret
+                  - !Ref ServerKeySecret
+      Path: /
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/AmazonEC2ContainerRegistryReadOnly
+        - arn:aws:iam::aws:policy/CloudWatchLogsFullAccess
+
+  CPTaskRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument: |
+        {
+            "Statement": [{
+                "Effect": "Allow",
+                "Principal": { "Service": [ "ecs-tasks.amazonaws.com" ]},
+                "Action": [ "sts:AssumeRole" ]
+            }]
+        }
+      Policies:
+        - PolicyName: put-api-token-secret
+          PolicyDocument:
+            Statement:
+              - Effect: Allow
+                Action:
+                  - secretsmanager:PutSecretValue
+                Resource:
+                  - !Ref APITokenSecret
+      Path: /
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/CloudWatchFullAccess
+        - arn:aws:iam::aws:policy/AWSXRayDaemonWriteAccess
+        - arn:aws:iam::aws:policy/AWSAppMeshEnvoyAccess
+
+  # CP security group configuration
+  CPSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: Access to Kong Mesh CP
+      VpcId:
+        Fn::ImportValue: !Join [":", [!Ref VPCStackName, VPCId]]
+
+  CPIngressTCPFromSelf:
+    Type: AWS::EC2::SecurityGroupIngress
+    Properties:
+      Description: Ingress for control plane TCP from VPC
+      GroupId: !Ref CPSecurityGroup
+      CidrIp: "10.0.0.0/8"
+      IpProtocol: tcp
+      FromPort: 5676
+      ToPort: 5682
+
+  CPPostgresFromSelf:
+    Type: AWS::EC2::SecurityGroupIngress
+    Properties:
+      Description: Ingress for control plane to postgres
+      GroupId: !Ref CPSecurityGroup
+      CidrIp: "10.0.0.0/8"
+      IpProtocol: tcp
+      FromPort: 5432
+      ToPort: 5432
+
+  # ECS configuration
+  CPLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Ref AWS::StackName
+      RetentionInDays: 7
+
+  CPService:
+    Type: AWS::ECS::Service
+    Properties:
+      LaunchType: FARGATE
+      Cluster:
+        Fn::ImportValue: !Join [":", [!Ref VPCStackName, ClusterName]]
+      DesiredCount: !Ref DesiredCount
+      TaskDefinition: !Ref CPTaskDefinition
+      # Our Dataplane proxies reach the control plane through this service
+      ServiceRegistries:
+        - RegistryArn: !GetAtt DiscoveryServiceCP.Arn
+          Port: 5678
+      # We can reach the control plane API via the NLB
+      LoadBalancers:
+        - TargetGroupArn: !Ref LoadBalancerTargetAPITLS
+          ContainerPort: 5682
+          ContainerName: controlplane
+      NetworkConfiguration:
+        AwsvpcConfiguration:
+          AssignPublicIp: ENABLED
+          Subnets:
+            - Fn::ImportValue: !Join [":", [!Ref VPCStackName, PublicSubnet]]
+          SecurityGroups:
+            - !Ref CPSecurityGroup
+            - Fn::ImportValue:
+                !Join [":", [!Ref VPCStackName, FargateContainerSecurityGroup]]
+
+  CPTaskDefinition:
+    Type: AWS::ECS::TaskDefinition
+    Properties:
+      Family: kong-mesh-cp-family
+      NetworkMode: awsvpc
+      RequiresCompatibilities:
+        - FARGATE
+      TaskRoleArn: !Ref CPTaskRole
+      ExecutionRoleArn: !Ref CPTaskExecutionRole
+      Cpu: 256
+      Memory: 512
+      Volumes:
+        - Name: token
+      ContainerDefinitions:
+        - Name: init
+          Essential: false
+          Image: !Ref Image
+          Secrets:
+            - Name: KUMA_STORE_POSTGRES_PASSWORD
+              ValueFrom: !Ref CPDatabasePassword
+          Environment:
+            - Name: KUMA_STORE_TYPE
+              Value: postgres
+            - Name: KUMA_STORE_POSTGRES_HOST
+              Value:
+                Fn::GetAtt: CPDatabase.Endpoint.Address
+            - Name: KUMA_STORE_POSTGRES_PORT
+              Value:
+                Fn::Sub: "${CPDatabase.Endpoint.Port}" # convert number to string
+            - Name: KUMA_STORE_POSTGRES_USER
+              Value: kongmesh
+            - Name: KUMA_STORE_POSTGRES_DB_NAME
+              Value: kongmesh
+          Command: [migrate, up]
+          LogConfiguration:
+            LogDriver: awslogs
+            Options:
+              awslogs-group: !Ref CPLogGroup
+              awslogs-region: !Ref AWS::Region
+              awslogs-stream-prefix: init
+        - Name: controlplane
+          DependsOn:
+            - Condition: SUCCESS
+              ContainerName: init
+          Essential: true
+          Image: !Ref Image
+          PortMappings:
+            - ContainerPort: 5676
+              Protocol: tcp
+            - ContainerPort: 5678
+              Protocol: tcp
+            - ContainerPort: 5682
+              Protocol: tcp
+          User: root:root # needed for UDP port 53 binding
+          Environment:
+            - Name: KUMA_MODE
+              Value: standalone
+            - Name: KMESH_LICENSE_PATH
+              Value: /tmp/license.json
+            - Name: KUMA_GENERAL_TLS_CERT_FILE
+              Value: /tmp/crt.pem
+            - Name: KUMA_GENERAL_TLS_KEY_FILE
+              Value: /tmp/key.pem
+            - Name: KUMA_STORE_TYPE
+              Value: postgres
+            - Name: KUMA_STORE_POSTGRES_HOST
+              Value:
+                Fn::GetAtt: CPDatabase.Endpoint.Address
+            - Name: KUMA_STORE_POSTGRES_PORT
+              Value:
+                Fn::Sub: "${CPDatabase.Endpoint.Port}"
+            - Name: KUMA_STORE_POSTGRES_USER
+              Value: kongmesh
+            - Name: KUMA_STORE_POSTGRES_DB_NAME
+              Value: kongmesh
+          Secrets:
+            - Name: KMESH_LICENSE
+              ValueFrom: !Ref LicenseSecret
+            - Name: KUMA_STORE_POSTGRES_PASSWORD
+              ValueFrom: !Ref CPDatabasePassword
+            - Name: TLS_CRT
+              ValueFrom: !Ref ServerCertSecret
+            - Name: TLS_KEY
+              ValueFrom: !Ref ServerKeySecret
+          EntryPoint:
+            - sh
+            - -c
+            - echo "${TLS_CRT}" > "${KUMA_GENERAL_TLS_CERT_FILE}" && echo "${TLS_KEY}" > "${KUMA_GENERAL_TLS_KEY_FILE}" && echo "${KMESH_LICENSE}" > "${KMESH_LICENSE_PATH}"; kuma-cp run
+          HealthCheck:
+            Command:
+              [
+                CMD-SHELL,
+                "wget -q -O - http://localhost:5680/healthy || exit 1",
+              ]
+            StartPeriod: 10
+            Interval: 10
+          LogConfiguration:
+            LogDriver: awslogs
+            Options:
+              awslogs-group: !Ref CPLogGroup
+              awslogs-region: !Ref AWS::Region
+              awslogs-stream-prefix: controlplane
+        # The next 2 containers fetch the admin token and save it to AWS secrets
+        # manager if it hasn't been saved yet
+        - Name: generate-user-token
+          Essential: false
+          DependsOn:
+            - Condition: HEALTHY
+              ContainerName: controlplane
+          Image: nicolaka/netshoot
+          User: root:root # needed for modifying mounted volume
+          EntryPoint:
+            - sh
+            - -c
+            - wget -O - http://localhost:5681/global-secrets/admin-user-token | jq -r .data | base64 -d > /var/token/api-token
+          MountPoints:
+            - ContainerPath: /var/token
+              SourceVolume: token
+        - Name: save-user-token
+          Essential: false
+          DependsOn:
+            - Condition: SUCCESS
+              ContainerName: generate-user-token
+          Image: amazon/aws-cli
+          EntryPoint:
+            - sh
+            - -c
+            - !Sub 'aws secretsmanager put-secret-value --client-request-token $(sha256sum /var/token/api-token | cut -d " " -f 1) --secret-id ${APITokenSecret} --secret-string file:///var/token/api-token'
+          MountPoints:
+            - ContainerPath: /var/token
+              SourceVolume: token
+              ReadOnly: true
+Outputs:
+  CPAddress:
+    Description: Address of the control plane
+    Value:
+      Fn::Sub:
+        - ${DiscoveryServiceCP.Name}.${TLD}
+        - TLD:
+            Fn::ImportValue: !Join [":", [!Ref VPCStackName, TLD]]
+    Export:
+      Name: !Join [":", [!Ref AWS::StackName, CPAddress]]
+  APITokenSecret:
+    Description: Secret ARN with an admin API token
+    Value: !Ref APITokenSecret
+    Export:
+      Name: !Join [":", [!Ref AWS::StackName, APITokenSecret]]
+  CPCASecret:
+    Description: ARN of an AWS secret containing a TLS CA for verifying control plane traffic
+    Value: !Ref ServerCertSecret
+    Export:
+      Name: !Join [":", [!Ref AWS::StackName, CPCASecret]]

@@ -29,6 +29,9 @@ jobs:
     name: "Test Kong Mesh on ECS"
     runs-on: ubuntu-latest
     outputs:
+      # Note that these are the _names_ and not the ARNs since it appears GH
+      # refuses to export a value if it contains a secret, in this case the AWS
+      # account id.
       license-secret: ${{ steps.cp.outputs.license-secret }}
       tls-key-secret: ${{ steps.cp.outputs.tls-key-secret }}
       tls-cert-secret: ${{ steps.cp.outputs.tls-cert-secret }}
@@ -60,8 +63,7 @@ jobs:
             aws secretsmanager create-secret \
                 --name ${{ env.stack-prefix }}/KongMeshLicense/${{ env.unique-id }} \
                 --description "Secret containing Kong Mesh license" \
-                --secret-string "${license}" \
-            | jq -r .ARN
+                --secret-string "${license}"
           )
 
           CP_ADDR=$(
@@ -74,30 +76,28 @@ jobs:
             aws secretsmanager create-secret \
               --name ${{ env.stack-prefix }}/CPTLSKey/${{ env.unique-id }} \
               --description "Secret containing TLS private key for serving control plane traffic" \
-              --secret-string file://key.pem \
-            | jq -r .ARN
+              --secret-string file://key.pem
           )
           TLS_CERT=$(
             aws secretsmanager create-secret \
               --name ${{ env.stack-prefix }}/CPTLSCert/${{ env.unique-id }} \
               --description "Secret containing TLS certificate for serving control plane traffic" \
-              --secret-string file://cert.pem \
-            | jq -r .ARN
+              --secret-string file://cert.pem
           )
 
           aws cloudformation deploy \
               --capabilities CAPABILITY_IAM \
               --stack-name ${{ env.stack-prefix}}-cp \
               --parameter-overrides VPCStackName=${{ env.stack-prefix }}-vpc \
-                LicenseSecret=${LICENSE_SECRET} \
-                ServerKeySecret=${TLS_KEY} \
-                ServerCertSecret=${TLS_CERT} \
+                LicenseSecret=$(jq .ARN <<< $LICENSE_SECRET) \
+                ServerKeySecret=$(jq .ARN <<< $TLS_KEY) \
+                ServerCertSecret=$(jq .ARN <<< $TLS_CERT) \
               --template-file deploy/controlplane.yaml
 
-          echo "::set-output name=license-secret::${LICENSE_SECRET}"
+          echo "::set-output name=license-secret::$(jq .Name <<< $LICENSE_SECRET)"
           echo "::set-output name=cp-addr::${CP_ADDR}"
-          echo "::set-output name=tls-key-secret::${TLS_KEY}"
-          echo "::set-output name=tls-cert-secret::${TLS_CERT}"
+          echo "::set-output name=tls-key-secret::$(jq .Name <<< $TLS_KEY)"
+          echo "::set-output name=tls-cert-secret::$(jq .Name <<< $TLS_CERT)"
       - name: Provision controller
         id: controller
         run: |
@@ -135,8 +135,7 @@ jobs:
             aws secretsmanager create-secret \
               --name ${{ env.stack-prefix }}/ECSToken/${{ env.unique-id }} \
               --description "Secret containing Kuma API token for us with ECS controller" \
-              --secret-string "${USER_TOKEN}" \
-            | jq -r .ARN
+              --secret-string "${USER_TOKEN}"
           )
 
           aws cloudformation deploy \
@@ -145,10 +144,10 @@ jobs:
             --parameter-overrides \
               VPCStackName=${{ env.stack-prefix}}-vpc \
               CPStackName=${{ env.stack-prefix}}-cp \
-              APITokenSecret=${USER_TOKEN_SECRET} \
+              APITokenSecret=$(jq .ARN <<< $USER_TOKEN_SECRET) \
             --template-file deploy/controller.yaml
 
-          echo "::set-output name=user-token-secret::${USER_TOKEN_SECRET}"
+          echo "::set-output name=user-token-secret::$(jq .Name <<< $USER_TOKEN_SECRET)"
       - name: Provision counter-demo
         run: |
           aws cloudformation deploy \

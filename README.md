@@ -1,5 +1,7 @@
 # Kong Mesh on ECS + Fargate
 
+[![Nightly Kong Mesh on ECS](https://github.com/Kong/kong-mesh-ecs/actions/workflows/nightly.yaml/badge.svg)](https://github.com/Kong/kong-mesh-ecs/actions/workflows/nightly.yaml)
+
 This repository provides some example CloudFormation templates for running
 Kong Mesh on ECS + Fargate.
 

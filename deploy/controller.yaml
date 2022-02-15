@@ -21,7 +21,7 @@ Parameters:
     Description: The desired replica count of the controller
   DataplaneTokenSecretPrefix:
     Type: String
-    Default: "kong-mesh-ecs-demo/"
+    Default: "kong-mesh-ecs/"
     Description: Prefix used for all dataplane tokens
   APITokenSecret:
     Type: String

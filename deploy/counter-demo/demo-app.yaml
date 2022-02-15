@@ -124,7 +124,7 @@ Resources:
     Type: AWS::Logs::LogGroup
     Properties:
       LogGroupName: !Ref AWS::StackName
-      RetentionInDays: 7 # days
+      RetentionInDays: 7
 
   WorkloadSecurityGroup:
     Type: AWS::EC2::SecurityGroup

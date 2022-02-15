@@ -52,7 +52,7 @@ your license file is at `license.json`:
 ```
 LICENSE_SECRET=$(
   aws secretsmanager create-secret \
-      --name kong-mesh-ecs-demo/License --description "Secret containing Kong Mesh license" \
+      --name ecs-demo/KongMeshLicense --description "Secret containing Kong Mesh license" \
       --secret-string file://license.json \
     | jq -r .ARN)
 ```
@@ -110,7 +110,6 @@ TLS_CERT=$(
 #### Deploy stack
 
 ```
-CIDR=$(curl ifconfig.co)
 aws cloudformation deploy \
     --capabilities CAPABILITY_IAM \
     --stack-name ecs-demo-kong-mesh-cp \

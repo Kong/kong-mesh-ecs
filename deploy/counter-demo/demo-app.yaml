@@ -17,7 +17,7 @@ Parameters:
     Description: Desired replica count of the workload
   DataplaneSecretPrefix:
     Type: String
-    Default: "kong-mesh-ecs-demo"
+    Default: "kong-mesh-ecs"
     Description: Prefix to use for naming dataplane token secrets
   AllowedCidr:
     Type: String

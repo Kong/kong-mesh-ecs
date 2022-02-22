@@ -105,6 +105,19 @@ jobs:
             aws cloudformation describe-stacks --stack-name ${{ env.stack-prefix }}-cp \
             | jq -r '.Stacks[0].Outputs[] | select(.OutputKey == "APITokenSecret") | .OutputValue'
           )
+
+          # The token may not have been put in the secret by the CP task yet
+          wait_num=15
+          while aws secretsmanager list-secret-version-ids --secret-id ${TOKEN_SECRET_ARN} | jq -e '.Versions | length == 0'; do
+            if (( wait_num-- <= 0 )); then
+              >&2 echo "Timed out waiting for control plane admin token"
+              exit 1
+            fi
+
+            echo "Waiting for control plane to save admin token..."
+            sleep 10s
+          done
+
           TOKEN=$(
             aws secretsmanager get-secret-value --secret-id ${TOKEN_SECRET_ARN} \
             | jq -r .SecretString

@@ -357,7 +357,7 @@ Resources:
               awslogs-stream-prefix: controlplane
         # The next 2 containers fetch the admin token and save it to AWS secrets
         # manager if it hasn't been saved yet
-        - Name: generate-user-token
+        - Name: fetch-admin-token
           Essential: false
           DependsOn:
             - Condition: HEALTHY
@@ -365,26 +365,45 @@ Resources:
           Image: nicolaka/netshoot
           User: root:root # needed for modifying mounted volume
           EntryPoint:
-            - sh
-            - -c
-            - wget -O - http://localhost:5681/global-secrets/admin-user-token | jq -r .data | base64 -d > /var/token/api-token
+            - bash
+            - -ec
+            - |
+              TOKEN_URL=http://localhost:5681/global-secrets/admin-user-token
+              # Wait until our token exists
+              while [[ $(curl -s -o /dev/null "${TOKEN_URL}" -w '%{http_code}') != "200" ]]; do
+                echo "Waiting 5s for admin token"
+                sleep 5s
+              done
+              curl -s -o - "${TOKEN_URL}" | jq -r .data | base64 -d > /var/token/api-token
           MountPoints:
             - ContainerPath: /var/token
               SourceVolume: token
-        - Name: save-user-token
+          LogConfiguration:
+            LogDriver: awslogs
+            Options:
+              awslogs-group: !Ref CPLogGroup
+              awslogs-region: !Ref AWS::Region
+              awslogs-stream-prefix: fetch-admin-token
+        - Name: save-admin-token
           Essential: false
           DependsOn:
             - Condition: SUCCESS
-              ContainerName: generate-user-token
+              ContainerName: fetch-admin-token
           Image: amazon/aws-cli
           EntryPoint:
-            - sh
+            - bash
             - -c
             - !Sub 'aws secretsmanager put-secret-value --client-request-token $(sha256sum /var/token/api-token | cut -d " " -f 1) --secret-id ${APITokenSecret} --secret-string file:///var/token/api-token'
           MountPoints:
             - ContainerPath: /var/token
               SourceVolume: token
               ReadOnly: true
+          LogConfiguration:
+            LogDriver: awslogs
+            Options:
+              awslogs-group: !Ref CPLogGroup
+              awslogs-region: !Ref AWS::Region
+              awslogs-stream-prefix: save-admin-token
 Outputs:
   CPAddress:
     Description: Address of the control plane

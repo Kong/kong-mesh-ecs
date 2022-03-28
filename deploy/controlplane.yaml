@@ -62,6 +62,9 @@ Resources:
 
   CPDatabase:
     Type: AWS::RDS::DBInstance
+    # The default is snapshot which is a good default but, we use this in CI where snapshots don't make sense
+    # If reusing this you probably don't want this deletionPolicy
+    DeletionPolicy: Delete
     Properties:
       DBName: kongmesh
       Engine: postgres

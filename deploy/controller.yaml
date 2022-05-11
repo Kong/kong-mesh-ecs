@@ -30,6 +30,7 @@ Mappings:
   Config:
     Controller:
       Name: "kong-mesh-ecs-controller"
+      Zone: "zone-1"
 
 Resources:
   ControllerTaskExecutionRole:
@@ -159,6 +160,8 @@ Resources:
                     Fn::ImportValue: !Join [":", [!Ref CPStackName, CPAddress]]
             - "--secret-name-prefix"
             - !Ref DataplaneTokenSecretPrefix
+            - "--zone"
+            - !FindInMap [Config, Controller, Zone]
           LogConfiguration:
             LogDriver: awslogs
             Options:

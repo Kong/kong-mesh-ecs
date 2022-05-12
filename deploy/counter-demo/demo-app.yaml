@@ -35,18 +35,22 @@ Mappings:
         networking:
           address: "{{ address }}"
           inbound:
-          - port: 80
-            servicePort: 5000
+          - port: {{ port }}
+            servicePort: {{ servicePort }}
             tags:
               kuma.io/service: "{{ service }}"
               kuma.io/protocol: "{{ protocol }}"
           outbound:
-          - port: 6379
+          - port: {{ redisPort }}
             tags:
               kuma.io/service: redis
     Workload:
-      ExternalPort: 80
+      # Our demo-app listens on this port
       Port: 5000
+      # The port we want to expose to our mesh
+      ExternalPort: 15000
+      # The port we want to contact redis on
+      RedisPort: 6379
       Image:  "thefosk/kuma-demo"
       Name: demo-app
 Resources:
@@ -61,7 +65,7 @@ Resources:
     Type: AWS::ElasticLoadBalancingV2::TargetGroup
     Properties:
       TargetType: ip
-      Port: !FindInMap [Config, Workload, Port]
+      Port: !FindInMap [Config, Workload, ExternalPort]
       Protocol: TCP
       VpcId:
         Fn::ImportValue: !Join [":", [!Ref VPCStackName, VPCId]]
@@ -71,7 +75,7 @@ Resources:
     Properties:
       LoadBalancerArn:
         Fn::ImportValue: !Join [":", [!Ref VPCStackName, LoadBalancer]]
-      Port: !FindInMap [Config, Workload, ExternalPort]
+      Port: 80
       Protocol: TCP
       DefaultActions:
         - Type: forward
@@ -133,8 +137,8 @@ Resources:
       SecurityGroupIngress:
         - CidrIp: "10.0.0.0/8"
           IpProtocol: tcp
-          ToPort: !FindInMap [Config, Workload, Port]
-          FromPort: !FindInMap [Config, Workload, Port]
+          ToPort: !FindInMap [Config, Workload, ExternalPort]
+          FromPort: !FindInMap [Config, Workload, ExternalPort]
       VpcId:
         Fn::ImportValue: !Join [":", [!Ref "VPCStackName", "VPCId"]]
 
@@ -158,8 +162,8 @@ Resources:
       TaskDefinition: !Ref "TaskDefinitionWorkload"
       LoadBalancers:
         - TargetGroupArn: !Ref LoadBalancerTargetDemoApp
-          ContainerPort: !FindInMap [Config, Workload, Port]
-          ContainerName: workload
+          ContainerPort: !FindInMap [Config, Workload, ExternalPort]
+          ContainerName: kuma-dp
       PropagateTags: SERVICE
       Tags:
         - Key: kuma.io/service
@@ -188,14 +192,11 @@ Resources:
         - Name: workload
           Essential: true
           Image: !FindInMap [Config, Workload, Image]
-          PortMappings:
-            - ContainerPort: !FindInMap [Config, Workload, Port]
-              Protocol: tcp
           Environment:
             - Name: REDIS_HOST
               Value: 127.0.0.1
             - Name: REDIS_PORT
-              Value: 6379
+              Value: !FindInMap [Config, Workload, RedisPort]
           LogConfiguration:
             LogDriver: awslogs
             Options:
@@ -205,7 +206,8 @@ Resources:
         - Name: kuma-dp
           Image: !Ref SidecarImage
           PortMappings:
-            - ContainerPort: 30001
+            - ContainerPort: !FindInMap [Config, Workload, ExternalPort]
+              Protocol: tcp
           Essential: true
           User: "5678"
           Secrets:
@@ -236,7 +238,11 @@ Resources:
                 - --dataplane-var
                 - !Join ["=", [mesh, !FindInMap [Config, Sidecar, Mesh]]]
                 - --dataplane-var
-                - !Join ["=", [port, !FindInMap [Config, Workload, Port]]]
+                - !Join ["=", [port, !FindInMap [Config, Workload, ExternalPort]]]
+                - --dataplane-var
+                - !Join ["=", [servicePort, !FindInMap [Config, Workload, Port]]]
+                - --dataplane-var
+                - !Join ["=", [redisPort, !FindInMap [Config, Workload, RedisPort]]]
                 - --dataplane-var
                 - !Join ["=", [service, !FindInMap [Config, Workload, Name]]]
                 - --dataplane-var

@@ -32,14 +32,15 @@ Mappings:
           address: "{{ address }}"
           inbound:
           - port: {{ port }}
+            servicePort: {{ servicePort }}
             tags:
               kuma.io/service: "{{ service }}"
               kuma.io/protocol: "{{ protocol }}"
-          transparentProxying:
-            redirectPortOutbound: 15001
-            redirectPortInbound: 15006
     Workload:
+      # redis itself listens on this port
       Port: 6379
+      # The port we want to expose to our mesh
+      ExternalPort: 16379
       Image: redis
       Name: redis
 Resources:
@@ -104,8 +105,8 @@ Resources:
       SecurityGroupIngress:
         - CidrIp: "10.0.0.0/8"
           IpProtocol: tcp
-          ToPort: !FindInMap [Config, Workload, Port]
-          FromPort: !FindInMap [Config, Workload, Port]
+          ToPort: !FindInMap [Config, Workload, ExternalPort]
+          FromPort: !FindInMap [Config, Workload, ExternalPort]
       VpcId:
         Fn::ImportValue: !Join [":", [!Ref VPCStackName, VPCId]]
 
@@ -144,9 +145,6 @@ Resources:
         - Name: workload
           Essential: true
           Image: !FindInMap [Config, Workload, Image]
-          PortMappings:
-            - ContainerPort: !FindInMap [Config, Workload, Port]
-              Protocol: tcp
           LogConfiguration:
             LogDriver: awslogs
             Options:
@@ -156,7 +154,8 @@ Resources:
         - Name: kuma-dp
           Image: !Ref SidecarImage
           PortMappings:
-            - ContainerPort: 30001
+            - ContainerPort: !FindInMap [Config, Workload, ExternalPort]
+              Protocol: tcp
           Essential: true
           User: "5678"
           Secrets:
@@ -187,7 +186,9 @@ Resources:
                 - --dataplane-var
                 - !Join ["=", [mesh, !FindInMap [Config, Sidecar, Mesh]]]
                 - --dataplane-var
-                - !Join ["=", [port, !FindInMap [Config, Workload, Port]]]
+                - !Join ["=", [port, !FindInMap [Config, Workload, ExternalPort]]]
+                - --dataplane-var
+                - !Join ["=", [servicePort, !FindInMap [Config, Workload, Port]]]
                 - --dataplane-var
                 - !Join ["=", [service, !FindInMap [Config, Workload, Name]]]
                 - --dataplane-var

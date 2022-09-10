@@ -35,7 +35,6 @@ jobs:
       license-secret: ${{ steps.cp.outputs.license-secret }}
       tls-key-secret: ${{ steps.cp.outputs.tls-key-secret }}
       tls-cert-secret: ${{ steps.cp.outputs.tls-cert-secret }}
-      user-token-secret: ${{ steps.controller.outputs.user-token-secret }}
     steps:
       - name: Checkout
         uses: actions/checkout@v2
@@ -98,8 +97,7 @@ jobs:
           echo "::set-output name=cp-addr::${CP_ADDR}"
           echo "::set-output name=tls-key-secret::$(jq -r .Name <<< $TLS_KEY)"
           echo "::set-output name=tls-cert-secret::$(jq -r .Name <<< $TLS_CERT)"
-      - name: Provision controller
-        id: controller
+      - name: Setup kumactl
         run: |
           TOKEN_SECRET_ARN=$(
             aws cloudformation describe-stacks --stack-name ${{ env.stack-prefix }}-cp \
@@ -139,28 +137,6 @@ jobs:
             --auth-type=tokens \
             --auth-conf token=${TOKEN} \
             --ca-cert-file cert.pem
-
-          USER_TOKEN=$(
-            kumactl generate user-token \
-              --name ecs-controller --group mesh-system:admin --valid-for 8766h
-          )
-          USER_TOKEN_SECRET=$(
-            aws secretsmanager create-secret \
-              --name ${{ env.stack-prefix }}/ECSToken/${{ env.unique-id }} \
-              --description "Secret containing Kuma API token for us with ECS controller" \
-              --secret-string "${USER_TOKEN}"
-          )
-
-          aws cloudformation deploy \
-            --capabilities CAPABILITY_IAM \
-            --stack-name ${{ env.stack-prefix}}-controller \
-            --parameter-overrides \
-              VPCStackName=${{ env.stack-prefix}}-vpc \
-              CPStackName=${{ env.stack-prefix}}-cp \
-              APITokenSecret=$(jq -r .ARN <<< $USER_TOKEN_SECRET) \
-            --template-file deploy/controller.yaml
-
-          echo "::set-output name=user-token-secret::$(jq -r .Name <<< $USER_TOKEN_SECRET)"
       - name: Provision counter-demo
         run: |
           aws cloudformation deploy \
@@ -212,17 +188,11 @@ jobs:
             --stack-name ${{ env.stack-prefix}}-demo-app
           aws cloudformation delete-stack \
             --stack-name ${{ env.stack-prefix}}-redis
-          aws cloudformation delete-stack \
-            --stack-name ${{ env.stack-prefix}}-controller
 
           aws cloudformation wait stack-delete-complete \
             --stack-name ${{ env.stack-prefix}}-demo-app
           aws cloudformation wait stack-delete-complete \
             --stack-name ${{ env.stack-prefix}}-redis
-          aws cloudformation wait stack-delete-complete \
-            --stack-name ${{ env.stack-prefix}}-controller
-
-          aws secretsmanager delete-secret --secret-id ${{ needs.test.outputs.user-token-secret }}
       - name: Deprovision control plane
         run: |
           aws cloudformation delete-stack \

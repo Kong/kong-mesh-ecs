@@ -9,7 +9,7 @@ Parameters:
     Description: Cloudformation stack used to provision the control plane.
   SidecarImage:
     Type: String
-    Default: "docker.io/kong/kuma-dp:1.7.0"
+    Default: "docker.io/kong/kuma-dp:2.0.0"
     Description: Name of the kuma-dp docker image
   DesiredCount:
     Type: String
@@ -123,6 +123,13 @@ Resources:
         - arn:aws:iam::aws:policy/CloudWatchFullAccess
         - arn:aws:iam::aws:policy/AWSXRayDaemonWriteAccess
         - arn:aws:iam::aws:policy/AWSAppMeshEnvoyAccess
+      Tags:
+        - Key: kuma.io/type
+          Value: dataplane
+        - Key: kuma.io/mesh
+          Value: default
+        - Key: kuma.io/service
+          Value: !FindInMap [Config, Workload, Name]
 
   LogGroup:
     Type: AWS::Logs::LogGroup
@@ -211,8 +218,6 @@ Resources:
           Essential: true
           User: "5678"
           Secrets:
-            - Name: KUMA_DATAPLANE_RUNTIME_TOKEN
-              ValueFrom: !Join [":", [!Ref DPTokenSecret, "token::"]]
             - Name: KUMA_CONTROL_PLANE_CA_CERT
               ValueFrom:
                 Fn::ImportValue: !Join [":", [!Ref CPStackName, CPCASecret]]
@@ -247,6 +252,7 @@ Resources:
                 - !Join ["=", [service, !FindInMap [Config, Workload, Name]]]
                 - --dataplane-var
                 - !Join ["=", [protocol, http]]
+                - --auth-type=aws
           LogConfiguration:
             LogDriver: awslogs
             Options:

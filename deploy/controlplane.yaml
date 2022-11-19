@@ -188,6 +188,14 @@ Resources:
                   - secretsmanager:PutSecretValue
                 Resource:
                   - !Ref APITokenSecret
+        - PolicyName: get-dataplane-roles
+          PolicyDocument:
+            Statement:
+              - Effect: Allow
+                Action:
+                  - iam:GetRole
+                Resource:
+                 - *
       Path: /
       ManagedPolicyArns:
         - arn:aws:iam::aws:policy/CloudWatchFullAccess

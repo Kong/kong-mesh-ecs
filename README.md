@@ -33,6 +33,19 @@ To enable this functionality, note that
   Value: "true"
 ```
 
+The `kuma-cp` task role also needs permissions to call `iam:GetRole` on any `kuma-dp` task roles. Add the following to your `kuma-cp` task role policy:
+
+```yaml
+- PolicyName: get-dataplane-roles
+  PolicyDocument:
+    Statement:
+      - Effect: Allow
+        Action:
+          - iam:GetRole
+        Resource:
+          - *
+```
+
 and we [add the following option to the `kuma-dp` container command](./deploy/counter-demo/demo-app.yaml#L251):
 
 ```yaml

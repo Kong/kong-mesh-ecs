@@ -195,7 +195,7 @@ Resources:
                 Action:
                   - iam:GetRole
                 Resource:
-                  - *
+                  - "*"
       Path: /
       ManagedPolicyArns:
         - arn:aws:iam::aws:policy/CloudWatchFullAccess

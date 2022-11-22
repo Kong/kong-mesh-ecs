@@ -7,7 +7,6 @@ on:
   push:
     branches:
       - main
-      - workload-identity
 
 env:
   stack-prefix: ecs-ci

@@ -15,9 +15,51 @@ The example deployment consists of CloudFormation stacks for setting up the mesh
 
 - VPC & ECS cluster stack
 - Kong Mesh CP stack
-- Kong Mesh ECS controller
 
 and two stacks for launching the demo.
+
+### Workload identity
+
+The `kuma-dp` container will use the identity of the ECS task to
+authenticate with the Kuma control plane.
+
+To enable this functionality, note that
+[we set the following `kuma-cp` options via environment variables](./deploy/controlplane.yaml#L334-L337):
+
+```yaml
+- Name: KUMA_DP_SERVER_AUTH_TYPE
+  Value: aws-iam
+- Name: KUMA_DP_SERVER_AUTH_USE_TOKEN_PATH
+  Value: "true"
+```
+
+The `kuma-cp` task role also needs permissions to call `iam:GetRole` on any `kuma-dp` task roles. Add the following to your `kuma-cp` task role policy:
+
+```yaml
+- PolicyName: get-dataplane-roles
+  PolicyDocument:
+    Statement:
+      - Effect: Allow
+        Action:
+          - iam:GetRole
+        Resource:
+          - *
+```
+
+and we [add the following option to the `kuma-dp` container command](./deploy/counter-demo/demo-app.yaml#L251):
+
+```yaml
+                - --auth-type=aws
+```
+
+In these examples, the [ECS task IAM role has the `kuma.io/service` tag set](./deploy/counter-demo/demo-app.yaml#L126-L128)
+to the name of the service the workload is running under:
+
+```yaml
+      Tags:
+        - Key: kuma.io/service
+          Value: !FindInMap [Config, Workload, Name]
+```
 
 ### Setup
 
@@ -147,41 +189,12 @@ kumactl config control-planes add \
 We can also open the Kong Mesh GUI at `https://${CP_ADDR}:5682/gui` (you'll need to
 force the browser to accept the self-signed certificate).
 
-### ECS controller
-
-The ECS controller needs a token for the Kong Mesh API. We could use the admin token
-but it's better to provision a separate [user
-token](https://kuma.io/docs/1.4.x/security/api-server-auth/#user-token) and give it the admin role.
-
-```
-ECS_TOKEN=$(kumactl generate user-token \
-  --name ecs-controller --group mesh-system:admin --valid-for 8766h)
-ECS_TOKEN_SECRET=$(aws secretsmanager create-secret \
-  --name ecs-demo/ECSToken \
-  --description "Secret containing Kong Mesh API token for us with ECS controller" \
-  --secret-string ${ECS_TOKEN} \
-  | jq -r .ARN)
-```
-
-Let's deploy the controller stack and point it to our VPC stack and CP stack:
-
-```
-aws cloudformation deploy \
-    --capabilities CAPABILITY_IAM \
-    --stack-name ecs-demo-kong-mesh-controller \
-    --parameter-overrides \
-      VPCStackName=ecs-demo-vpc \
-      CPStackName=ecs-demo-kong-mesh-cp \
-      APITokenSecret=${ECS_TOKEN_SECRET} \
-    --template-file deploy/controller.yaml
-```
-
 We now have our control plane running and can begin deploying applications!
 
 ### Demo app
 
-We can now launch our app components and the ECS controller will handle
-provisioning tokens for the dataplane proxies.
+We can now launch our app components and the workload identity feature will
+handle authentication with the control plane.
 
 ```
 aws cloudformation deploy \
@@ -212,8 +225,6 @@ To cleanup the resources we created you can execute the following:
 ```
 aws cloudformation delete-stack --stack-name ecs-demo-demo-app
 aws cloudformation delete-stack --stack-name ecs-demo-demo-redis
-aws cloudformation delete-stack --stack-name ecs-demo-kong-mesh-controller
-aws secretsmanager delete-secret --secret-id ${ECS_TOKEN_SECRET}
 aws cloudformation delete-stack --stack-name ecs-demo-kong-mesh-cp
 aws secretsmanager delete-secret --secret-id ${TLS_CERT}
 aws secretsmanager delete-secret --secret-id ${TLS_KEY}

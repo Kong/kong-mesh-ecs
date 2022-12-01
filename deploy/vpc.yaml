@@ -79,6 +79,7 @@ Resources:
       Type: network
       Subnets:
         - !Ref PublicSubnet
+    DependsOn: PublicRoute
 
   # ECS Resources
   ECSCluster:

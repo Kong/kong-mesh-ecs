@@ -9,7 +9,7 @@ Parameters:
     Description: Cloudformation stack used to provision the control plane.
   SidecarImage:
     Type: String
-    Default: "docker.io/kong/kuma-dp:2.0.0"
+    Default: "docker.io/kong/kuma-dp:2.0.3"
     Description: Name of the kuma-dp docker image
   DesiredCount:
     Type: String

@@ -1,5 +1,8 @@
 name: "Nightly Kong Mesh on ECS"
 
+concurrency:
+  group: ${{github.workflow}}
+
 on:
   workflow_dispatch: {}
   schedule:

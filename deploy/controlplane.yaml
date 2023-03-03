@@ -8,7 +8,7 @@ Parameters:
       to locate and reference resources created by that stack.
   Image:
     Type: String
-    Default: "docker.io/kong/kuma-cp:2.0.3"
+    Default: "docker.io/kong/kuma-cp:2.1.1"
     Description: Name of the control plane docker image
   AllowedCidr:
     Type: String
@@ -361,7 +361,7 @@ Resources:
           HealthCheck:
             Command:
               [
-                CMD-SHELL,
+                CMD, "/busybox/busybox", "sh", "-c",
                 "wget -q -O - http://localhost:5680/healthy || exit 1",
               ]
             StartPeriod: 10

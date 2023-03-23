@@ -40,9 +40,9 @@ jobs:
       tls-cert-secret: ${{ steps.cp.outputs.tls-cert-secret }}
     steps:
       - name: Checkout
-        uses: actions/checkout@v2
+        uses: actions/checkout@v3
       - name: Configure AWS Credentials
-        uses: aws-actions/configure-aws-credentials@v1
+        uses: aws-actions/configure-aws-credentials@v2
         with:
           role-to-assume: arn:aws:iam::${{ secrets.NIGHTLY_AWS_ACCOUNT_ID }}:role/ecs-ci
           aws-region: us-east-2
@@ -96,10 +96,10 @@ jobs:
                 ServerCertSecret=$(jq -r .ARN <<< $TLS_CERT) \
               --template-file deploy/controlplane.yaml
 
-          echo "::set-output name=license-secret::$(jq -r .Name <<< $LICENSE_SECRET)"
-          echo "::set-output name=cp-addr::${CP_ADDR}"
-          echo "::set-output name=tls-key-secret::$(jq -r .Name <<< $TLS_KEY)"
-          echo "::set-output name=tls-cert-secret::$(jq -r .Name <<< $TLS_CERT)"
+          echo "license-secret=$(jq -r .Name <<< $LICENSE_SECRET)" >> $GITHUB_OUTPUT
+          echo "cp-addr=${CP_ADDR}" >> $GITHUB_OUTPUT
+          echo "tls-key-secret=$(jq -r .Name <<< $TLS_KEY)" >> $GITHUB_OUTPUT
+          echo "tls-cert-secret=$(jq -r .Name <<< $TLS_CERT)" >> $GITHUB_OUTPUT
       - name: Setup kumactl
         run: |
           TOKEN_SECRET_ARN=$(

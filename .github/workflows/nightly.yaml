@@ -162,7 +162,7 @@ jobs:
             --capabilities CAPABILITY_IAM \
             --stack-name ${{ env.stack-prefix }}-redis \
             --parameter-overrides \
-              Image="docker.io/kong/kuma-dp:${{ steps.version.outputs.version }}" \
+              SidecarImage="docker.io/kong/kuma-dp:${{ steps.version.outputs.version }}" \
               VPCStackName=${{ env.stack-prefix }}-vpc \
               CPStackName=${{ env.stack-prefix }}-cp \
             --template-file deploy/counter-demo/redis.yaml
@@ -171,7 +171,7 @@ jobs:
             --capabilities CAPABILITY_IAM \
             --stack-name ${{ env.stack-prefix }}-demo-app \
             --parameter-overrides \
-              Image="docker.io/kong/kuma-dp:${{ steps.version.outputs.version }}" \
+              SidecarImage="docker.io/kong/kuma-dp:${{ steps.version.outputs.version }}" \
               VPCStackName=${{ env.stack-prefix }}-vpc \
               CPStackName=${{ env.stack-prefix }}-cp \
             --template-file deploy/counter-demo/demo-app.yaml

@@ -31,6 +31,9 @@ jobs:
   test:
     name: "Test Kong Mesh on ECS"
     runs-on: ubuntu-latest
+    defaults:
+      run:
+        shell: /usr/bin/bash -Eeuo pipefail {0}
     outputs:
       # Note that these are the _names_ and not the ARNs since it appears GH
       # refuses to export a value if it contains a secret, in this case the AWS
@@ -46,9 +49,21 @@ jobs:
         with:
           role-to-assume: arn:aws:iam::${{ secrets.NIGHTLY_AWS_ACCOUNT_ID }}:role/ecs-ci
           aws-region: us-east-2
+      - name: Generate GitHub app token
+        id: github-app-token
+        uses: tibdex/github-app-token@b62528385c34dbc9f38e5f4225ac829252d1ea92 # v1.8.0
+        with:
+          app_id: ${{ vars.KONG_MESH_APP_ID }}
+          private_key: ${{ secrets.KONG_MESH_APP_PRIVATE_KEY }}
+      - name: Get version
+        id: version
+        env:
+          GH_TOKEN: ${{ steps.github-app-token.outputs.token }}
+        run: |
+          echo "version=$(curl --silent -L https://docs.konghq.com/mesh/installer.sh  | VERSION=preview sh -s - --print-version | tail -n1)" >> $GITHUB_OUTPUT
       - name: Install kumactl
         run: |
-          curl -L https://docs.konghq.com/mesh/installer.sh | sh -
+          curl -L https://docs.konghq.com/mesh/installer.sh | VERSION="${{ steps.version.outputs.version }}" sh -
           cp kong-mesh-*/bin/kumactl /usr/local/bin/kumactl
       - name: Provision VPC
         run: |
@@ -91,6 +106,7 @@ jobs:
               --capabilities CAPABILITY_IAM \
               --stack-name ${{ env.stack-prefix}}-cp \
               --parameter-overrides VPCStackName=${{ env.stack-prefix }}-vpc \
+                Image="docker.io/kong/kuma-cp:${{ steps.version.outputs.version }}" \
                 LicenseSecret=$(jq -r .ARN <<< $LICENSE_SECRET) \
                 ServerKeySecret=$(jq -r .ARN <<< $TLS_KEY) \
                 ServerCertSecret=$(jq -r .ARN <<< $TLS_CERT) \
@@ -146,6 +162,7 @@ jobs:
             --capabilities CAPABILITY_IAM \
             --stack-name ${{ env.stack-prefix }}-redis \
             --parameter-overrides \
+              Image="docker.io/kong/kuma-dp:${{ steps.version.outputs.version }}" \
               VPCStackName=${{ env.stack-prefix }}-vpc \
               CPStackName=${{ env.stack-prefix }}-cp \
             --template-file deploy/counter-demo/redis.yaml
@@ -154,6 +171,7 @@ jobs:
             --capabilities CAPABILITY_IAM \
             --stack-name ${{ env.stack-prefix }}-demo-app \
             --parameter-overrides \
+              Image="docker.io/kong/kuma-dp:${{ steps.version.outputs.version }}" \
               VPCStackName=${{ env.stack-prefix }}-vpc \
               CPStackName=${{ env.stack-prefix }}-cp \
             --template-file deploy/counter-demo/demo-app.yaml

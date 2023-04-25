@@ -266,3 +266,11 @@ service. The sidecar is then configured to route requests to `redis:6379` to our
 
 This repository includes a [GitHub Workflow](.github/workflows/nightly.yaml)
 that executes the above steps and tests that the demo works every night.
+
+### Failures
+
+Note that if the job fails, any CloudFormation stacks created during the failed
+run are not deleted. The next GH workflow run will not succeed unless all stacks
+from previous runs are deleted. This means any `ecs-ci-*` stacks need to be
+manually deleted in the nightly AWS account in the event of a workflow run
+failure.

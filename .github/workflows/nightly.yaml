@@ -4,7 +4,11 @@ concurrency:
   group: ${{github.workflow}}
 
 on:
-  workflow_dispatch: {}
+  workflow_dispatch:
+    inputs:
+      version:
+        description: Kong Mesh version to build (same format as installer.sh). Otherwise latest preview is used.
+        type: string
   schedule:
     - cron: "25 4 * * *"
   push:
@@ -60,7 +64,11 @@ jobs:
         env:
           GH_TOKEN: ${{ steps.github-app-token.outputs.token }}
         run: |
-          echo "version=$(curl --silent -L https://docs.konghq.com/mesh/installer.sh  | VERSION=preview sh -s - --print-version | tail -n1)" >> $GITHUB_OUTPUT
+          version="${{ inputs.version }}"
+          if [[ -z "${version}" ]]; then
+            version=$(curl --silent -L https://docs.konghq.com/mesh/installer.sh  | VERSION=preview sh -s - --print-version | tail -n1)
+          fi
+          echo "version=${version}" >> $GITHUB_OUTPUT
       - name: Install kumactl
         run: |
           curl -L https://docs.konghq.com/mesh/installer.sh | VERSION="${{ steps.version.outputs.version }}" sh -

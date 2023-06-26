@@ -1,0 +1,18 @@
+---
+name: project-lifecycle
+on: # yamllint disable-line rule:truthy
+  schedule:
+    - cron: 0 7 * * *
+  workflow_dispatch:
+  issues:
+    types:
+      - reopened
+      - opened
+      - labeled
+
+jobs:
+  lifecycle:
+    uses: kumahq/.github/.github/workflows/wfc_lifecycle.yml@main
+    with:
+      # These files to sync are OSS things which have no place here
+      filesToIgnore: "CODE_OF_CONDUCT.md,LICENSE,SECURITY.md,CODEOWNERS,GOVERNANCE.md,CONTRIBUTING.md"

@@ -140,7 +140,8 @@
         "rds:DeleteDBSubnetGroup",
         "rds:DescribeDBInstances",
         "rds:CreateDBInstance",
-        "rds:DeleteDBInstance"
+        "rds:DeleteDBInstance",
+        "rds:ListTagsForResource"
       ],
       "Resource": "*"
     },

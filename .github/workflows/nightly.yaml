@@ -10,7 +10,7 @@ on:
         description: Kong Mesh version to build (same format as installer.sh). Otherwise latest preview is used.
         type: string
       skip-cleanup:
-        description: Whether to cleanup resources
+        description: Skip resource cleanup
         type: boolean
         required: false
   schedule:

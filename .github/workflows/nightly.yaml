@@ -9,6 +9,10 @@ on:
       version:
         description: Kong Mesh version to build (same format as installer.sh). Otherwise latest preview is used.
         type: string
+      skip-cleanup:
+        description: Whether to cleanup resources
+        type: boolean
+        required: false
   schedule:
     - cron: "25 4 * * *"
   push:
@@ -202,6 +206,7 @@ jobs:
   teardown:
     needs: test
     name: "Cleanup after successful test"
+    if: '!inputs.skip-cleanup'
     runs-on: ubuntu-latest
     steps:
       - name: Checkout

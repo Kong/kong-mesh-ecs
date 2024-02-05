@@ -37,6 +37,7 @@ permissions:
 # credentials and then assume the aforementioned IAM role.
 jobs:
   test:
+    timeout-minutes: 30
     name: "Test Kong Mesh on ECS"
     runs-on: ubuntu-latest
     defaults:
@@ -204,6 +205,7 @@ jobs:
           test $((NEXT_COUNTER - COUNTER)) -eq 1
 
   teardown:
+    timeout-minutes: 30
     needs: test
     name: "Cleanup after successful test"
     if: '!inputs.skip-cleanup'

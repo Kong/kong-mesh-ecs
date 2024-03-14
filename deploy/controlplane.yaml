@@ -343,9 +343,11 @@ Resources:
               Value: kongmesh
             - Name: KUMA_STORE_POSTGRES_TLS_MODE
               Value: verifyNone
-            - Name: KUMA_DP_SERVER_AUTH_TYPE
+            - Name: KUMA_DP_SERVER_AUTHN_DP_PROXY_TYPE
               Value: aws-iam
-            - Name: KUMA_DP_SERVER_AUTH_USE_TOKEN_PATH
+            - Name: KUMA_DP_SERVER_AUTHN_ZONE_PROXY_TYPE
+              Value: aws-iam
+            - Name: KUMA_DP_SERVER_AUTHN_ENABLE_RELOADABLE_TOKENS
               Value: "true"
             - Name: KMESH_AWSIAM_AUTHORIZEDACCOUNTIDS
               Value: !Ref AWS::AccountId

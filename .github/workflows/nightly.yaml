@@ -26,7 +26,6 @@ env:
 permissions:
   id-token: write
   contents: read
-  actions: read
 
 # In the AWS account, GitHub is registered as an OIDC provider.
 # There is also an IAM role that trusts tokens issued by this provider to this

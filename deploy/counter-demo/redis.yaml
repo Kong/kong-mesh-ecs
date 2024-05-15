@@ -132,7 +132,7 @@ Resources:
       ServiceName: !FindInMap [Config, Workload, Name]
       NetworkConfiguration:
         AwsvpcConfiguration:
-          AssignPublicIp: ENABLED
+          AssignPublicIp: DISABLED
           Subnets:
             - Fn::ImportValue: !Join [":", [!Ref VPCStackName, PublicSubnet]]
           SecurityGroups: [!Ref WorkloadSecurityGroup]

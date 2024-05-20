@@ -112,6 +112,11 @@ Resources:
       Protocol: TCP
       VpcId:
         Fn::ImportValue: !Join [":", [!Ref VPCStackName, VPCId]]
+      HealthCheckProtocol: "HTTP"
+      HealthCheckPort: "5680"
+      HealthCheckPath: "/healthy"
+      Matcher:
+        HttpCode: "200"
 
   LoadBalancerListenerAPITLS:
     Type: AWS::ElasticLoadBalancingV2::Listener

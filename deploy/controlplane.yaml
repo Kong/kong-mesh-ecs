@@ -354,6 +354,12 @@ Resources:
               Value: aws-iam
             - Name: KUMA_DP_SERVER_AUTHN_ENABLE_RELOADABLE_TOKENS
               Value: "true"
+              # These environment variables are deprecated and only required for
+              # installing older versions of Kong Mesh.
+            - Name: KUMA_DP_SERVER_AUTH_TYPE
+              Value: aws-iam
+            - Name: KUMA_DP_SERVER_AUTH_USE_TOKEN_PATH
+              Value: "true"
             - Name: KMESH_AWSIAM_AUTHORIZEDACCOUNTIDS
               Value: !Ref AWS::AccountId
           Secrets:

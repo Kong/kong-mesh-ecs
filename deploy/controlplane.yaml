@@ -13,7 +13,7 @@ Parameters:
   AllowedCidr:
     Type: String
     Default: "10.0.0.0/8"
-    Description: CIDR used to restrict control plane access
+    Description: CIDR used to restrict control plane and redis access
   DesiredCount:
     Type: Number
     Default: 1
@@ -219,7 +219,7 @@ Resources:
     Properties:
       Description: Ingress for control plane TCP from VPC
       GroupId: !Ref CPSecurityGroup
-      CidrIp: "10.0.0.0/8"
+      CidrIp: !Ref AllowedCidr
       IpProtocol: tcp
       FromPort: 5676
       ToPort: 5682
@@ -229,7 +229,7 @@ Resources:
     Properties:
       Description: Ingress for control plane to postgres
       GroupId: !Ref CPSecurityGroup
-      CidrIp: "10.0.0.0/8"
+      CidrIp: !Ref AllowedCidr
       IpProtocol: tcp
       FromPort: 5432
       ToPort: 5432

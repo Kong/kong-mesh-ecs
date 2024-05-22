@@ -33,7 +33,7 @@ Parameters:
 Resources:
   # Database
   DBSubnetGroup:
-    Type: "AWS::RDS::DBSubnetGroup"
+    Type: AWS::RDS::DBSubnetGroup
     Properties:
       DBSubnetGroupDescription: !Ref AWS::StackName
       SubnetIds:

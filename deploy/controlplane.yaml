@@ -73,14 +73,7 @@ Resources:
       Engine: postgres
       MasterUsername: kongmesh
       MasterUserPassword:
-        !Join [
-          "",
-          [
-            "{{resolve:secretsmanager:",
-            !Ref CPDatabasePassword,
-            ":SecretString}}",
-          ],
-        ]
+        Fn::Sub: "{{resolve:secretsmanager:${CPDatabasePassword}:SecretString}}"
       AllocatedStorage: 50
       DBInstanceClass: db.m5.large
       DBSubnetGroupName: !Ref DBSubnetGroup

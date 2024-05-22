@@ -42,6 +42,8 @@ Resources:
 
   CPDatabasePassword:
     Type: AWS::SecretsManager::Secret
+    DeletionPolicy: Delete
+    UpdateReplacePolicy: Delete
     Properties:
       # Using the StackId gives us a randomness to the name while allowing us to
       # prefix it with a path
@@ -65,6 +67,7 @@ Resources:
     # The default is snapshot which is a good default but, we use this in CI where snapshots don't make sense
     # If reusing this you probably don't want this deletionPolicy
     DeletionPolicy: Delete
+    UpdateReplacePolicy: Delete
     Properties:
       DBName: kongmesh
       Engine: postgres
@@ -83,6 +86,7 @@ Resources:
       DBSubnetGroupName: !Ref DBSubnetGroup
       VPCSecurityGroups:
         - !Ref CPSecurityGroup
+      BackupRetentionPeriod: 1
 
   # We use ECS service discovery to let the mesh data plane proxies
   # communicate with the control plane
@@ -134,6 +138,8 @@ Resources:
   # The control plane task populates this secret with the admin token
   APITokenSecret:
     Type: AWS::SecretsManager::Secret
+    DeletionPolicy: Delete
+    UpdateReplacePolicy: Delete
     Properties:
       Name:
         !Join [
@@ -238,6 +244,8 @@ Resources:
   # ECS configuration
   CPLogGroup:
     Type: AWS::Logs::LogGroup
+    DeletionPolicy: Delete
+    UpdateReplacePolicy: Delete
     Properties:
       LogGroupName: !Ref AWS::StackName
       RetentionInDays: 7

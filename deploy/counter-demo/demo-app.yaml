@@ -9,7 +9,7 @@ Parameters:
     Description: Cloudformation stack used to provision the control plane.
   SidecarImage:
     Type: String
-    Default: "docker.io/kong/kuma-dp:2.1.1"
+    Default: "docker.io/bartsmykla/kuma-dp:2.6.5"
     Description: Name of the kuma-dp docker image
   DesiredCount:
     Type: String
@@ -23,6 +23,10 @@ Parameters:
     Type: String
     Default: "10.0.0.0/8"
     Description: CIDR used to restrict the kuma-cp ports access
+  ZoneName:
+    Type: String
+    Default: "zone"
+    Description: Name of the zone
 Mappings:
   Config:
     Sidecar:
@@ -58,7 +62,7 @@ Resources:
     Type: AWS::SecretsManager::Secret
     Properties:
       Description: Secret containing Kuma Dataplane Token
-      Name: !Join ["/", [!Ref DataplaneSecretPrefix, !FindInMap [Config, Workload, Name]]]
+      Name: !Join ["/", [!Ref DataplaneSecretPrefix, !Ref ZoneName, !FindInMap [Config, Workload, Name]]]
       SecretString: "{}"
 
   LoadBalancerTargetDemoApp:
@@ -146,6 +150,10 @@ Resources:
           IpProtocol: tcp
           ToPort: !FindInMap [Config, Workload, ExternalPort]
           FromPort: !FindInMap [Config, Workload, ExternalPort]
+        - CidrIp: "0.0.0.0/0"
+          IpProtocol: tcp
+          ToPort: 9901
+          FromPort: 9901
       VpcId:
         Fn::ImportValue: !Join [":", [!Ref "VPCStackName", "VPCId"]]
 
@@ -175,7 +183,7 @@ Resources:
       Tags:
         - Key: kuma.io/service
           Value: !FindInMap [Config, Workload, Name]
-      ServiceName: !FindInMap [Config, Workload, Name]
+      ServiceName: !Join ["-", [!Ref ZoneName, !FindInMap [Config, Workload, Name]]]
       NetworkConfiguration:
         AwsvpcConfiguration:
           AssignPublicIp: ENABLED
@@ -187,7 +195,7 @@ Resources:
   TaskDefinitionWorkload:
     Type: AWS::ECS::TaskDefinition
     Properties:
-      Family: !FindInMap [Config, Workload, Name]
+      Family: !Join ["-", [!Ref ZoneName, !FindInMap [Config, Workload, Name]]]
       NetworkMode: awsvpc
       RequiresCompatibilities:
         - FARGATE

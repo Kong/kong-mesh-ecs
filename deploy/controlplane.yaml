@@ -22,6 +22,7 @@ Parameters:
   LicenseSecret:
     Type: String
     Description: Secret ARN holding a Kong Mesh license
+    Default: ""
 
   ServerCertSecret:
     Type: String
@@ -29,6 +30,25 @@ Parameters:
   ServerKeySecret:
     Type: String
     Description: ARN of an AWS secret containing a TLS private key for serving control plane traffic
+
+  Mode:
+    Type: String
+    Default: Zone
+    AllowedValues:
+      - Zone
+      - MultizoneGlobal
+      - MultizoneZone
+
+  ZoneName:
+    Type: String
+    Description: Name of the zone
+  GlobalZoneAddress:
+    Type: String
+    Description: Global Zone address
+
+Conditions:
+  IsMultizoneGlobal: !Equals [!Ref Mode, "MultizoneGlobal"]
+  IsMultizoneZone: !Equals [!Ref Mode, "MultizoneZone"]
 
 Resources:
   # Database
@@ -163,7 +183,7 @@ Resources:
                 Action:
                   - secretsmanager:GetSecretValue
                 Resource:
-                  - !Ref LicenseSecret
+                  - !If [IsMultizoneGlobal, !Ref LicenseSecret, !Ref AWS::NoValue]
                   - !Ref CPDatabasePassword
                   - !Ref ServerCertSecret
                   - !Ref ServerKeySecret
@@ -328,9 +348,27 @@ Resources:
           User: root:root # needed for UDP port 53 binding
           Environment:
             - Name: KUMA_MODE
-              Value: standalone
-            - Name: KMESH_LICENSE_PATH
-              Value: /tmp/license.json
+              Value: !If [IsMultizoneGlobal, "global", "zone"]
+            - !If
+              - IsMultizoneGlobal
+              - !Ref AWS::NoValue
+              - Name: KUMA_MULTIZONE_ZONE_NAME
+                Value: !Ref ZoneName
+            - !If
+              - IsMultizoneGlobal
+              - Name: KMESH_LICENSE_PATH
+                Value: /tmp/license.json
+              - !Ref AWS::NoValue
+            - !If
+              - IsMultizoneZone
+              - Name: KUMA_MULTIZONE_ZONE_GLOBAL_ADDRESS
+                Value: !Ref GlobalZoneAddress # grpcs://[...]:5685
+              - !Ref AWS::NoValue
+            - !If
+              - IsMultizoneZone
+              - Name: KUMA_MULTIZONE_ZONE_KDS_TLS_SKIP_VERIFY
+                Value: "true"
+              - !Ref AWS::NoValue
             - Name: KUMA_GENERAL_TLS_CERT_FILE
               Value: /tmp/crt.pem
             - Name: KUMA_GENERAL_TLS_KEY_FILE
@@ -364,8 +402,11 @@ Resources:
             - Name: KMESH_AWSIAM_AUTHORIZEDACCOUNTIDS
               Value: !Ref AWS::AccountId
           Secrets:
-            - Name: KMESH_LICENSE
-              ValueFrom: !Ref LicenseSecret
+            - !If
+              - IsMultizoneGlobal
+              - Name: KMESH_LICENSE
+                ValueFrom: !Ref LicenseSecret
+              - !Ref AWS::NoValue
             - Name: KUMA_STORE_POSTGRES_PASSWORD
               ValueFrom: !Ref CPDatabasePassword
             - Name: TLS_CRT
@@ -375,7 +416,10 @@ Resources:
           EntryPoint:
             - sh
             - -c
-            - echo "${TLS_CRT}" > "${KUMA_GENERAL_TLS_CERT_FILE}" && echo "${TLS_KEY}" > "${KUMA_GENERAL_TLS_KEY_FILE}" && echo "${KMESH_LICENSE}" > "${KMESH_LICENSE_PATH}"; kuma-cp run
+            - !If
+              - IsMultizoneGlobal
+              - echo "${TLS_CRT}" > "${KUMA_GENERAL_TLS_CERT_FILE}" && echo "${TLS_KEY}" > "${KUMA_GENERAL_TLS_KEY_FILE}" && echo "${KMESH_LICENSE}" > "${KMESH_LICENSE_PATH}"; kuma-cp run
+              - echo "${TLS_CRT}" > "${KUMA_GENERAL_TLS_CERT_FILE}" && echo "${TLS_KEY}" > "${KUMA_GENERAL_TLS_KEY_FILE}"; kuma-cp run
           HealthCheck:
             Command:
               [

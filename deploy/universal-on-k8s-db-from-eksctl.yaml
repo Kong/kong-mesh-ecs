@@ -1,0 +1,102 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: EKS Cluster for Demo
+Parameters:
+  DBName:
+    Type: String
+    Description: Name of the DB Name
+    Default: kongmesh
+  MasterUsername:
+    Type: String
+    Description: Name of the DB Master Username
+    Default: kongmesh
+
+Resources:
+  SecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: Access to Kong Mesh CP DB
+      VpcId: vpc-0a927e1c6e1e4a692
+
+  PostgresFromSubnet:
+    Type: AWS::EC2::SecurityGroupIngress
+    Properties:
+      Description: Ingress for control plane to postgres
+      GroupId: !Ref SecurityGroup
+      CidrIp: 192.168.0.0/16
+      IpProtocol: tcp
+      FromPort: 5432
+      ToPort: 5432
+
+  # Database
+  SubnetGroup:
+    Type: AWS::RDS::DBSubnetGroup
+    Properties:
+      DBSubnetGroupDescription: !Ref AWS::StackName
+      SubnetIds:
+        - subnet-01ce6f348f0076a7e
+        - subnet-0adf72fb776a01ee5
+        - subnet-04bd2c8bbaa655d12
+
+  DatabasePassword:
+    Type: AWS::SecretsManager::Secret
+    DeletionPolicy: Delete
+    UpdateReplacePolicy: Delete
+    Properties:
+      # Using the StackId gives us a randomness to the name while allowing us to
+      # prefix it with a path
+      Name:
+        !Join [
+          "/",
+          [
+            !Ref AWS::StackName,
+            "CPDatabasePassword",
+            !Select [2, !Split ["/", !Ref AWS::StackId]],
+          ],
+        ]
+      Description: Secret containing the password for the Kong Mesh CP DB backend
+      GenerateSecretString:
+        ExcludeCharacters: >-
+          '"@/\
+        PasswordLength: 16
+
+  Database:
+    Type: AWS::RDS::DBInstance
+    # The default is snapshot which is a good default but, we use this in CI where snapshots don't make sense
+    # If reusing this you probably don't want this deletionPolicy
+    DeletionPolicy: Delete
+    UpdateReplacePolicy: Delete
+    Properties:
+      DBName: !Ref DBName
+      Engine: postgres
+      MasterUsername: !Ref MasterUsername
+      MasterUserPassword:
+        Fn::Sub: "{{resolve:secretsmanager:${DatabasePassword}:SecretString}}"
+      AllocatedStorage: 50
+      DBInstanceClass: db.m5.large
+      DBSubnetGroupName: !Ref SubnetGroup
+      VPCSecurityGroups:
+        - !Ref SecurityGroup
+      BackupRetentionPeriod: 1
+
+Outputs:
+  Address:
+    Description: The address to the Database
+    # noinspection YamlFormatViolation
+    Value: !GetAtt Database.Endpoint.Address
+    Export:
+      Name: !Join [":", [!Ref AWS::StackName, Address]]
+  DBName:
+    Description: The database name
+    Value: !Ref DBName
+    Export:
+      Name: !Join [":", [!Ref AWS::StackName, DBName]]
+  MasterUsername:
+    Description: The database user
+    Value: !Ref MasterUsername
+    Export:
+      Name: !Join [":", [!Ref AWS::StackName, MasterUsername]]
+  Password:
+    Description: The database password
+    Value: !Ref DatabasePassword
+    Export:
+      Name: !Join [":", [!Ref AWS::StackName, Password]]

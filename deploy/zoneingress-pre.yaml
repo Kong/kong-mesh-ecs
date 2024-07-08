@@ -1,0 +1,167 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: ZoneIngress for the Kuma Counter Demo
+Parameters:
+  VPCStackName:
+    Type: String
+    Description: Stack used to create the VPC
+  CPStackName:
+    Type: String
+    Description: Cloudformation stack used to provision the control plane.
+  DataplaneSecretPrefix:
+    Type: String
+    Default: "kong-mesh-ecs"
+    Description: Prefix to use for naming dataplane token secrets
+  ZoneName:
+    Type: String
+    Default: "zone"
+    Description: Name of the zone
+
+Mappings:
+  Config:
+    ZoneIngress:
+      Port: 10001
+      Name: zoneingress
+
+Resources:
+  SecretTokenZoneIngress:
+    Type: AWS::SecretsManager::Secret
+    Properties:
+      Description: Secret containing Kuma Token for ZoneIngress
+      Name: !Join ["/", [!Ref DataplaneSecretPrefix, !Ref ZoneName, !FindInMap [Config, ZoneIngress, Name]]]
+      SecretString: "{}"
+
+  RoleExecutionTaskZoneIngress:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: [ecs-tasks.amazonaws.com]
+            Action: [sts:AssumeRole]
+      Policies:
+        - PolicyName: get-kuma-dp-token-secret
+          PolicyDocument:
+            Statement:
+              - Effect: Allow
+                Action:
+                  - secretsmanager:GetSecretValue
+                Resource:
+                  - !Ref SecretTokenZoneIngress
+                  - Fn::ImportValue: !Join [":", [!Ref CPStackName, CPCASecret]]
+      Path: /
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/AmazonEC2ContainerRegistryReadOnly
+        - arn:aws:iam::aws:policy/CloudWatchLogsFullAccess
+
+  IamRoleTaskZoneIngress:
+    Type: AWS::IAM::Role
+    Properties:
+      Path: /
+      AssumeRolePolicyDocument: |
+        {
+            "Statement": [{
+                "Effect": "Allow",
+                "Principal": { "Service": [ "ecs-tasks.amazonaws.com" ]},
+                "Action": [ "sts:AssumeRole" ]
+            }]
+        }
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/CloudWatchFullAccess
+        - arn:aws:iam::aws:policy/AWSXRayDaemonWriteAccess
+        - arn:aws:iam::aws:policy/AWSAppMeshEnvoyAccess
+      Tags:
+        - Key: kuma.io/type
+          Value: ingress
+#        - Key: kuma.io/zone
+#          Value: !Ref ZoneName
+
+  LogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Ref AWS::StackName
+      RetentionInDays: 7
+
+  SecurityGroupZoneIngress:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: ZoneIngress security group
+      SecurityGroupIngress:
+        - CidrIp: "0.0.0.0/0"
+          IpProtocol: tcp
+          ToPort: !FindInMap [Config, ZoneIngress, Port]
+          FromPort: !FindInMap [Config, ZoneIngress, Port]
+        - CidrIp: "0.0.0.0/0"
+          IpProtocol: tcp
+          ToPort: 9901
+          FromPort: 9901
+      VpcId:
+        Fn::ImportValue: !Join [":", [!Ref VPCStackName, VPCId]]
+
+  LoadBalancerZoneIngress:
+    Type: AWS::ElasticLoadBalancingV2::LoadBalancer
+    Properties:
+      Name: !Join ["-", [!Ref ZoneName, !FindInMap [Config, ZoneIngress, Name]]]
+      IpAddressType: ipv4
+      Scheme: internet-facing
+      Type: network
+      Subnets:
+        - Fn::ImportValue: !Join [":", [!Ref VPCStackName, PublicSubnet]]
+
+  LoadBalancerTargetZoneIngress:
+    Type: AWS::ElasticLoadBalancingV2::TargetGroup
+    Properties:
+      TargetType: ip
+      Port: !FindInMap [Config, ZoneIngress, Port]
+      Protocol: TCP
+      VpcId:
+        Fn::ImportValue: !Join [":", [!Ref VPCStackName, VPCId]]
+      HealthCheckProtocol: "HTTP"
+      HealthCheckPort: "9901"
+      HealthCheckPath: "/ready"
+      Matcher:
+        HttpCode: "200"
+
+  LoadBalancerListenerZoneIngress:
+    Type: AWS::ElasticLoadBalancingV2::Listener
+    Properties:
+      LoadBalancerArn: !Ref LoadBalancerZoneIngress
+      Port: !FindInMap [Config, ZoneIngress, Port]
+      Protocol: TCP
+      DefaultActions:
+        - Type: forward
+          ForwardConfig:
+            TargetGroups:
+              - TargetGroupArn: !Ref LoadBalancerTargetZoneIngress
+
+Outputs:
+  LoadBalancerAddress:
+    Description: Address of the ZoneIngress load balancer
+    Value: !GetAtt LoadBalancerZoneIngress.DNSName
+    Export:
+      Name: !Join [":", [!Ref AWS::StackName, LoadBalancerAddress]]
+  LoadBalancerTargetZoneIngress:
+    Description: LoadBalancerTargetZoneIngress
+    Value: !Ref LoadBalancerTargetZoneIngress
+    Export:
+      Name: !Join [":", [!Ref AWS::StackName, LoadBalancerTargetZoneIngress]]
+  SecurityGroupZoneIngress:
+    Description: SecurityGroupZoneIngress
+    Value: !Ref SecurityGroupZoneIngress
+    Export:
+      Name: !Join [":", [!Ref AWS::StackName, SecurityGroupZoneIngress]]
+  IamRoleTaskZoneIngress:
+    Description: IamRoleTaskZoneIngress
+    Value: !Ref IamRoleTaskZoneIngress
+    Export:
+      Name: !Join [":", [!Ref AWS::StackName, IamRoleTaskZoneIngress]]
+  RoleExecutionTaskZoneIngress:
+    Description: RoleExecutionTaskZoneIngress
+    Value: !Ref RoleExecutionTaskZoneIngress
+    Export:
+      Name: !Join [":", [!Ref AWS::StackName, RoleExecutionTaskZoneIngress]]
+  LogGroup:
+    Description: LogGroup
+    Value: !Ref LogGroup
+    Export:
+      Name: !Join [":", [!Ref AWS::StackName, LogGroup]]

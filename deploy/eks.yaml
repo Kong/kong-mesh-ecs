@@ -1,0 +1,112 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: EKS Cluster for Demo
+Parameters:
+  VPCStackName:
+    Type: String
+    Description:
+      Name of the parent Fargate networking stack that you created. Necessary
+      to locate and reference resources created by that stack.
+  NodeInstanceType:
+    Type: String
+    Description: EC2 instance type for the worker nodes
+    Default: t3.medium
+  DesiredCapacity:
+    Type: Number
+    Description: Desired number of worker nodes
+    Default: 2
+    MinValue: 1
+    MaxValue: 10
+  # Worker nodes Keys
+  WorkerNodesSSHKeyName:
+    Type: AWS::EC2::KeyPair::KeyName
+    Description: EC2 key pair to associate with the worker nodes
+    Default: ""
+  PublicKeyMaterial:
+    Type: String
+    Description:
+      The public key material. The PublicKeyMaterial property is used to import
+      a key pair. If this property is not specified, then a new key pair will be
+      created.
+    Default: ""
+
+Conditions:
+  CreateNewKeyPair: !Equals [!Ref WorkerNodesSSHKeyName, ""]
+  ImportPublicKey: !And
+    - !Not [!Equals [!Ref PublicKeyMaterial, ""]]
+    - !Condition CreateNewKeyPair
+
+Resources:
+  WorkerNodesKeyPair:
+    Type: AWS::EC2::KeyPair
+    Condition: CreateNewKeyPair
+    Properties:
+      KeyName: !Sub ${AWS::StackName}-key
+      PublicKeyMaterial: !If [ImportPublicKey, !Ref PublicKeyMaterial, !Ref AWS::NoValue]
+
+  EKSClusterRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub ${AWS::StackName}-role
+      AssumeRolePolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: eks.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/AmazonEKSClusterPolicy
+
+  ClusterSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: Security group for the EKS cluster
+      VpcId:
+        Fn::ImportValue: !Join [":", [!Ref VPCStackName, VPCId]]
+
+  NodeInstanceRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub ${AWS::StackName}-node-instance-role
+      AssumeRolePolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: ec2.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/AmazonEKSWorkerNodePolicy
+        - arn:aws:iam::aws:policy/AmazonEKS_CNI_Policy
+        - arn:aws:iam::aws:policy/AmazonEC2ContainerRegistryReadOnly
+
+  NodeGroup:
+    Type: AWS::EKS::Nodegroup
+    DependsOn: EKSCluster
+    Properties:
+      ClusterName: !Ref AWS::StackName
+      NodegroupName: !Sub "${AWS::StackName}-node-group"
+      NodeRole: !GetAtt NodeInstanceRole.Arn
+      Subnets:
+        - Fn::ImportValue: !Join [":", [!Ref VPCStackName, PublicSubnet]]
+        - Fn::ImportValue: !Join [":", [!Ref VPCStackName, PublicSubnet2]]
+      ScalingConfig:
+        DesiredSize: !Ref DesiredCapacity
+        MinSize: 1
+        MaxSize: 10
+      InstanceTypes:
+        - !Ref NodeInstanceType
+      RemoteAccess:
+        Ec2SshKey: !If [CreateNewKeyPair, !Ref WorkerNodesKeyPair, !Ref WorkerNodesSSHKeyName]
+
+  EKSCluster:
+    Type: AWS::EKS::Cluster
+    Properties:
+      Name: !Ref AWS::StackName
+      RoleArn: !GetAtt EKSClusterRole.Arn
+      ResourcesVpcConfig:
+        SecurityGroupIds:
+          - !Ref ClusterSecurityGroup
+        SubnetIds:
+          - Fn::ImportValue: !Join [":", [!Ref VPCStackName, PublicSubnet]]
+          - Fn::ImportValue: !Join [":", [!Ref VPCStackName, PublicSubnet2]]

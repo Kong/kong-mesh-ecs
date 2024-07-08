@@ -1,0 +1,136 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: ZoneIngress for the Kuma Counter Demo
+Parameters:
+  VPCStackName:
+    Type: String
+    Description: Stack used to create the VPC
+  CPStackName:
+    Type: String
+    Description: Cloudformation stack used to provision the control plane.
+  PreStackName:
+    Type: String
+    Description: Cloudformation stack used to provision pre
+  ImageKumaDP:
+    Type: String
+    Default: "docker.io/bartsmykla/kuma-dp:2.4.3-debug-1"
+    Description: Name of the kuma-dp docker image
+  DesiredCount:
+    Type: String
+    Default: 1
+    Description: Desired replica count of the workload
+  ZoneName:
+    Type: String
+    Default: "zone"
+    Description: Name of the zone
+
+Mappings:
+  Config:
+    ZoneIngress:
+      Port: 10001
+      Name: zoneingress
+      Template: |
+        type: ZoneIngress
+        name: "{{ name }}"
+        zone: "{{ zone }}"
+        networking:
+          address: "{{ address }}"
+          advertisedAddress: "{{ advertisedAddress }}"
+          port: "{{ port }}"
+          advertisedPort: "{{ advertisedPort }}"
+
+Resources:
+  ServiceZoneIngress:
+    Type: AWS::ECS::Service
+    Properties:
+      LaunchType: FARGATE
+      Cluster:
+        Fn::ImportValue: !Join [":", [!Ref VPCStackName, ClusterName]]
+      DesiredCount: !Ref DesiredCount
+      TaskDefinition: !Ref TaskDefinitionZoneIngress
+      PropagateTags: SERVICE
+      ServiceName: !Join ["-", [!Ref ZoneName, !FindInMap [Config, ZoneIngress, Name]]]
+      LoadBalancers:
+        - TargetGroupArn:
+            Fn::ImportValue: !Join [":", [!Ref PreStackName, LoadBalancerTargetZoneIngress]]
+          ContainerPort: !FindInMap [Config, ZoneIngress, Port]
+          ContainerName: zoneingress
+      NetworkConfiguration:
+        AwsvpcConfiguration:
+          AssignPublicIp: ENABLED
+          Subnets:
+            - Fn::ImportValue: !Join [":", [!Ref VPCStackName, PublicSubnet]]
+          SecurityGroups:
+            - Fn::ImportValue:
+                !Join [":", [!Ref PreStackName, SecurityGroupZoneIngress]]
+            - Fn::ImportValue:
+                !Join [":", [!Ref VPCStackName, FargateContainerSecurityGroup]]
+
+  TaskDefinitionZoneIngress:
+    Type: AWS::ECS::TaskDefinition
+    Properties:
+      Family: !Join ["-", [!Ref ZoneName, !FindInMap [Config, ZoneIngress, Name]]]
+      NetworkMode: awsvpc
+      RequiresCompatibilities:
+        - FARGATE
+      TaskRoleArn:
+        Fn::ImportValue: !Join [":", [!Ref PreStackName, IamRoleTaskZoneIngress]]
+      ExecutionRoleArn:
+        Fn::ImportValue: !Join [":", [!Ref PreStackName, RoleExecutionTaskZoneIngress]]
+      Cpu: 256
+      Memory: 512
+      ContainerDefinitions:
+        - Name: zoneingress
+          Image: !Ref ImageKumaDP
+          PortMappings:
+            - ContainerPort: !FindInMap [Config, ZoneIngress, Port]
+              Protocol: tcp
+          Essential: true
+          Secrets:
+            - Name: KUMA_CONTROL_PLANE_CA_CERT
+              ValueFrom:
+                Fn::ImportValue: !Join [":", [!Ref CPStackName, CPCASecret]]
+          Environment:
+            - Name: KUMA_DATAPLANE_RUNTIME_RESOURCE
+              Value: !FindInMap [Config, ZoneIngress, Template]
+          EntryPoint: ["sh", "-c"]
+          Command:
+            - !Join
+              - " "
+              - - kuma-dp
+                - run
+                - --proxy-type
+                - ingress
+                - --cp-address
+                - Fn::Sub:
+                    - https://${Hostname}:5678
+                    - Hostname:
+                        Fn::ImportValue: !Join [":", [!Ref CPStackName, CPAddress]]
+                - --dataplane-var
+#                - name=`hostname -s`
+                - !Join ["=", [name, !Join ["-", [!Ref ZoneName, !FindInMap [Config, ZoneIngress, Name]]]]]
+                - --dataplane-var
+                - !Join ["=", [zone, !Ref ZoneName]]
+                - --dataplane-var
+                - address=`hostname -i`
+                - --dataplane-var
+                - !Join ["=", [advertisedAddress, Fn::ImportValue: !Join [":", [!Ref PreStackName, LoadBalancerAddress]]]]
+                - --dataplane-var
+                - !Join ["=", [port, !FindInMap [Config, ZoneIngress, Port]]]
+                - --dataplane-var
+                - !Join ["=", [advertisedPort, !FindInMap [Config, ZoneIngress, Port]]]
+                - --auth-type=aws
+          HealthCheck:
+            Command:
+              [
+                CMD, "/busybox/busybox", "sh", "-c",
+                "wget -q -O - http://localhost:9901/ready || exit 1",
+              ]
+            StartPeriod: 5
+            Interval: 10
+          LogConfiguration:
+            LogDriver: awslogs
+            Options:
+              awslogs-group:
+                Fn::ImportValue: !Join [":", [!Ref PreStackName, LogGroup]]
+              awslogs-region: !Ref AWS::Region
+              awslogs-stream-prefix: zoneingress

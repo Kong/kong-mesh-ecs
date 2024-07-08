@@ -190,6 +190,11 @@ Outputs:
     Value: !Ref PublicSubnet
     Export:
       Name: !Join [":", [!Ref AWS::StackName, PublicSubnet]]
+  PublicSubnetCidrBlock:
+    Description: Public subnet CIDR Block
+    Value: !GetAtt PublicSubnet.CidrBlock
+    Export:
+      Name: !Join [":", [!Ref AWS::StackName, PublicSubnetCidrBlock]]
   PublicSubnet2:
     Description: Public subnet
     Value: !Ref PublicSubnet2

@@ -49,16 +49,16 @@ The `kuma-cp` task role also needs permissions to call `iam:GetRole` on any `kum
 and we [add the following option to the `kuma-dp` container command](./deploy/counter-demo/demo-app.yaml#L251):
 
 ```yaml
-                - --auth-type=aws
+- --auth-type=aws
 ```
 
 In these examples, the [ECS task IAM role has the `kuma.io/service` tag set](./deploy/counter-demo/demo-app.yaml#L126-L128)
 to the name of the service the workload is running under:
 
 ```yaml
-      Tags:
-        - Key: kuma.io/service
-          Value: !FindInMap [Config, Workload, Name]
+Tags:
+  - Key: kuma.io/service
+    Value: !FindInMap [Config, Workload, Name]
 ```
 
 ### Setup
@@ -274,3 +274,7 @@ run are not deleted. The next GH workflow run will not succeed unless all stacks
 from previous runs are deleted. This means any `ecs-ci-*` stacks need to be
 manually deleted in the nightly AWS account in the event of a workflow run
 failure.
+
+In case of failure, check the Events of the failed Cloudformation stack.
+For example if an ECS service fails to create, you can look at the
+failed/deleted ECS tasks for more information.

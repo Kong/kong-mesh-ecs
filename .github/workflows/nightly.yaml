@@ -1,4 +1,5 @@
 name: "Nightly Kong Mesh on ECS"
+run-name: "Nightly Kong Mesh on ECS - ${{ inputs.version || 'preview' }}"
 
 concurrency:
   group: ${{github.workflow}}

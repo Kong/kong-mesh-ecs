@@ -27,10 +27,20 @@ To enable this functionality, note that
 [we set the following `kuma-cp` options via environment variables](./deploy/controlplane.yaml#L334-L337):
 
 ```yaml
-- Name: KUMA_DP_SERVER_AUTH_TYPE
+- Name: KUMA_DP_SERVER_AUTHN_DP_PROXY_TYPE
   Value: aws-iam
-- Name: KUMA_DP_SERVER_AUTH_USE_TOKEN_PATH
+- Name: KUMA_DP_SERVER_AUTHN_ZONE_PROXY_TYPE
+  Value: aws-iam
+- Name: KUMA_DP_SERVER_AUTHN_ENABLE_RELOADABLE_TOKENS
   Value: "true"
+```
+
+We also add the following to tell the CP to only allow identities for certain
+accounts:
+
+```yaml
+- Name: KMESH_AWSIAM_AUTHORIZEDACCOUNTIDS
+  Value: !Ref AWS::AccountId # this tells the CP which accounts can be used by DPs to authenticate
 ```
 
 The `kuma-cp` task role also needs permissions to call `iam:GetRole` on any `kuma-dp` task roles. Add the following to your `kuma-cp` task role policy:

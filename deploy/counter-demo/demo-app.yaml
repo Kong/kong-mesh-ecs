@@ -123,6 +123,17 @@ Resources:
         - arn:aws:iam::aws:policy/CloudWatchFullAccess
         - arn:aws:iam::aws:policy/AWSXRayDaemonWriteAccess
         - arn:aws:iam::aws:policy/AWSAppMeshEnvoyAccess
+      Policies:
+        - PolicyName: allow-ecs-exec
+          PolicyDocument:
+            Statement:
+              Effect: Allow
+              Action:
+                - "ssmmessages:CreateControlChannel"
+                - "ssmmessages:CreateDataChannel"
+                - "ssmmessages:OpenControlChannel"
+                - "ssmmessages:OpenDataChannel"
+              Resource: "*"
       Tags:
         - Key: kuma.io/type
           Value: dataplane
@@ -167,6 +178,7 @@ Resources:
         Fn::ImportValue: !Join [":", [!Ref "VPCStackName", "ClusterName"]]
       DesiredCount: !Ref DesiredCount
       TaskDefinition: !Ref "TaskDefinitionWorkload"
+      EnableExecuteCommand: true
       LoadBalancers:
         - TargetGroupArn: !Ref LoadBalancerTargetDemoApp
           ContainerPort: !FindInMap [Config, Workload, ExternalPort]

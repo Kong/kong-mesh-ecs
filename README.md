@@ -277,6 +277,19 @@ service. The sidecar is then configured to route requests to `redis:6379` to our
 This repository includes a [GitHub Workflow](.github/workflows/nightly.yaml)
 that executes the above steps and tests that the demo works every night.
 
+### Accessing the containers
+
+You can use ECS exec to get a shell to one of the containers to debug issues.
+Given a task ARN and a cluster name:
+
+```
+aws ecs execute-command --cluster ${ECS_CLUSTER_NAME} \
+          --task ${ECS_TASK_ARN} \
+          --container workload \
+          --interactive \
+          --command "/bin/sh"
+```
+
 ### Failures
 
 Note that if the job fails, any CloudFormation stacks created during the failed

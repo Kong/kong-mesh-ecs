@@ -12,7 +12,7 @@ on: # yamllint disable-line rule:truthy
 
 jobs:
   lifecycle:
-    uses: kumahq/.github/.github/workflows/wfc_lifecycle.yml@main
+    uses: kumahq/.github/.github/workflows/wfc_lifecycle.yml@417fa247cd071cad8628a63bf54ca54fd8baf96d
     with:
       # These files to sync are OSS things which have no place here
       filesToIgnore: "CODE_OF_CONDUCT.md,LICENSE,SECURITY.md,CODEOWNERS,GOVERNANCE.md,CONTRIBUTING.md"

@@ -205,7 +205,7 @@ Resources:
                   - route53:ChangeResourceRecordSets
                   - route53:GetHostedZone
                 Resource:
-                  - Fn::ImportValue: !Join [":", [!Ref VPCStackName, HostedZoneId]]
+                  - "*"
       Path: /
       ManagedPolicyArns:
         - arn:aws:iam::aws:policy/CloudWatchFullAccess

@@ -164,9 +164,9 @@ Resources:
   MyPrivateHostedZone:
     Type: AWS::Route53::HostedZone
     Properties:
-      Name: .mesh
+      Name: mesh.local
       HostedZoneConfig:
-        Comment: "Private hosted zone for internal services .mesh"
+        Comment: "Private hosted zone for internal services mesh"
       VPCs:
         - VPCId: !Ref "VPC"
           VPCRegion: !Ref AWS::Region

@@ -373,6 +373,8 @@ Resources:
               Value: "127.3.0.0/16"
             - Name: KUMA_RUNTIME_UNIVERSAL_DYNAMIC_OUTBOUNDS
               Value: "true"
+            - Name: KUMA_DNS_SERVER_DOMAIN
+              Value: "mesh.local"
           Secrets:
             - Name: KMESH_LICENSE
               ValueFrom: !Ref LicenseSecret

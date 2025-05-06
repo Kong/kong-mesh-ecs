@@ -351,6 +351,28 @@ Resources:
               Value: "true"
             - Name: KMESH_AWSIAM_AUTHORIZEDACCOUNTIDS
               Value: !Ref AWS::AccountId
+            - Name: KUMA_DEFAULTS_SKIP_HOSTNAME_GENERATORS
+              Value: "true"
+            - Name: KMESH_CLOUD_AWS_ROUTE53_ENABLED
+              Value: "true"
+            - Name: KMESH_CLOUD_AWS_ROUTE53_HOSTED_ZONE_IDS
+              Value: 
+                Fn::Join:
+                  - ""
+                  - - '["'
+                    - !ImportValue 
+                      Fn::Sub: "${VPCStackName}:HostedZoneId"
+                    - '"]'
+            - Name: KUMA_DNS_SERVER_CIDR
+              Value: "127.0.0.0/16"
+            - Name: KUMA_IPAM_MESH_MULTI_ZONE_SERVICE_CIDR
+              Value: "127.1.0.0/16"
+            - Name: KUMA_IPAM_MESH_EXTERNAL_SERVICE_CIDR
+              Value: "127.2.0.0/16"
+            - Name: KUMA_IPAM_MESH_SERVICE_CIDR
+              Value: "127.3.0.0/16"
+            - Name: KUMA_RUNTIME_UNIVERSAL_DYNAMIC_OUTBOUNDS
+              Value: "true"
           Secrets:
             - Name: KMESH_LICENSE
               ValueFrom: !Ref LicenseSecret

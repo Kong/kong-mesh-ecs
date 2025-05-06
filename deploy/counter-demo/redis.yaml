@@ -36,6 +36,7 @@ Mappings:
             tags:
               kuma.io/service: "{{ service }}"
               kuma.io/protocol: "{{ protocol }}"
+          transparentProxying: {}
     Workload:
       # redis itself listens on this port
       Port: 6379
@@ -114,6 +115,10 @@ Resources:
           IpProtocol: tcp
           ToPort: !FindInMap [Config, Workload, ExternalPort]
           FromPort: !FindInMap [Config, Workload, ExternalPort]
+        - CidrIp: "10.0.0.0/8"
+          IpProtocol: tcp
+          ToPort: 9901
+          FromPort: 9901
       VpcId:
         Fn::ImportValue: !Join [":", [!Ref VPCStackName, VPCId]]
 
@@ -162,6 +167,8 @@ Resources:
           Image: !Ref SidecarImage
           PortMappings:
             - ContainerPort: !FindInMap [Config, Workload, ExternalPort]
+              Protocol: tcp
+            - ContainerPort: 9901
               Protocol: tcp
           Essential: true
           User: "5678"

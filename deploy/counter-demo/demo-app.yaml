@@ -154,6 +154,10 @@ Resources:
           IpProtocol: tcp
           ToPort: !FindInMap [Config, Workload, ExternalPort]
           FromPort: !FindInMap [Config, Workload, ExternalPort]
+        - CidrIp: "10.0.0.0/8"
+          IpProtocol: tcp
+          ToPort: 9901
+          FromPort: 9901
       VpcId:
         Fn::ImportValue: !Join [":", [!Ref "VPCStackName", "VPCId"]]
 

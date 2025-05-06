@@ -167,9 +167,9 @@ Resources:
       Name: .mesh
       HostedZoneConfig:
         Comment: "Private hosted zone for internal services .mesh"
-        PrivateZone: true
       VPCs:
         - VPCId: !Ref "VPC"
+          VPCRegion: !Ref AWS::Region
 
 # These are the values output by the CloudFormation template. Be careful
 # about changing any of them, because of them are exported with specific

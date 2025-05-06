@@ -126,6 +126,15 @@ Resources:
                   - "ec2:DeleteNetworkInterfacePermission"
                   - "ec2:Describe*"
                   - "ec2:DetachNetworkInterface"
+                  - "route53:CreateHostedZone"
+                  - "route53:UpdateHostedZoneComment"
+                  - "route53:GetHostedZone"
+                  - "route53:ListHostedZones"
+                  - "route53:DeleteHostedZone"
+                  - "route53:ChangeResourceRecordSets"
+                  - "route53:ListResourceRecordSets"
+                  - "route53:GetHostedZoneCount"
+                  - "route53:ListHostedZonesByName"
                 Resource: "*"
 
   # This is a role which is used by the ECS tasks themselves.

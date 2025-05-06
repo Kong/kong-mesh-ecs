@@ -196,6 +196,16 @@ Resources:
                   - iam:GetRole
                 Resource:
                   - "*"
+        - PolicyName: update-route53
+          PolicyDocument:
+            Statement:
+              - Effect: Allow
+                Action:
+                  - route53:ListResourceRecordSets
+                  - route53:ChangeResourceRecordSets
+                  - route53:GetHostedZone
+                Resource:
+                  - Fn::ImportValue: !Join [":", [!Ref VPCStackName, HostedZoneId]]
       Path: /
       ManagedPolicyArns:
         - arn:aws:iam::aws:policy/CloudWatchFullAccess
@@ -359,12 +369,10 @@ Resources:
               Value: 
                 Fn::Join:
                   - ""
-                  - - '["'
-                    - !ImportValue 
+                  - - !ImportValue
                       Fn::Sub: "${VPCStackName}:HostedZoneId"
-                    - '"]'
             - Name: KUMA_DNS_SERVER_CIDR
-              Value: "127.0.0.0/16"
+              Value: "127.4.0.0/16"
             - Name: KUMA_IPAM_MESH_MULTI_ZONE_SERVICE_CIDR
               Value: "127.1.0.0/16"
             - Name: KUMA_IPAM_MESH_EXTERNAL_SERVICE_CIDR
@@ -375,6 +383,8 @@ Resources:
               Value: "true"
             - Name: KUMA_DNS_SERVER_DOMAIN
               Value: "mesh.local"
+            - Name: KUMA_DNS_SERVER_SERVICE_VIP_PORT
+              Value: 8080
           Secrets:
             - Name: KMESH_LICENSE
               ValueFrom: !Ref LicenseSecret

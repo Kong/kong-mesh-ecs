@@ -36,7 +36,6 @@ Mappings:
             tags:
               kuma.io/service: "{{ service }}"
               kuma.io/protocol: "{{ protocol }}"
-          transparentProxying: {}
     Workload:
       # redis itself listens on this port
       Port: 6379
@@ -206,6 +205,7 @@ Resources:
                 - --dataplane-var
                 - !Join ["=", [protocol, tcp]]
                 - --auth-type=aws
+                - --bind-outbounds
           LogConfiguration:
             LogDriver: awslogs
             Options:

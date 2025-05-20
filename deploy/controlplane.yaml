@@ -363,24 +363,22 @@ Resources:
               Value: !Ref AWS::AccountId
             - Name: KUMA_DEFAULTS_SKIP_HOSTNAME_GENERATORS
               Value: "true"
-            - Name: KMESH_CLOUD_AWS_ROUTE53_ENABLED
+            - Name: KMESH_RUNTIME_AWS_ROUTE53_ENABLED
               Value: "true"
-            - Name: KMESH_CLOUD_AWS_ROUTE53_HOSTED_ZONE_IDS
+            - Name: KMESH_RUNTIME_AWS_ROUTE53_HOSTED_ZONE_ID
               Value: 
                 Fn::Join:
                   - ""
                   - - !ImportValue
                       Fn::Sub: "${VPCStackName}:HostedZoneId"
             - Name: KUMA_DNS_SERVER_CIDR
-              Value: "127.4.0.0/16"
-            - Name: KUMA_IPAM_MESH_MULTI_ZONE_SERVICE_CIDR
               Value: "127.1.0.0/16"
-            - Name: KUMA_IPAM_MESH_EXTERNAL_SERVICE_CIDR
+            - Name: KUMA_IPAM_MESH_MULTI_ZONE_SERVICE_CIDR
               Value: "127.2.0.0/16"
-            - Name: KUMA_IPAM_MESH_SERVICE_CIDR
+            - Name: KUMA_IPAM_MESH_EXTERNAL_SERVICE_CIDR
               Value: "127.3.0.0/16"
-            - Name: KUMA_RUNTIME_UNIVERSAL_DYNAMIC_OUTBOUNDS
-              Value: "true"
+            - Name: KUMA_IPAM_MESH_SERVICE_CIDR
+              Value: "127.4.0.0/16"
             - Name: KUMA_DNS_SERVER_DOMAIN
               Value: "mesh.local"
             - Name: KUMA_DNS_SERVER_SERVICE_VIP_PORT

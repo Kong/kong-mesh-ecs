@@ -40,7 +40,6 @@ Mappings:
             tags:
               kuma.io/service: "{{ service }}"
               kuma.io/protocol: "{{ protocol }}"
-          transparentProxying: {}
     Workload:
       # Our demo-app listens on this port
       Port: 5000
@@ -266,6 +265,7 @@ Resources:
                 - --dataplane-var
                 - !Join ["=", [protocol, http]]
                 - --auth-type=aws
+                - --bind-outbounds
           LogConfiguration:
             LogDriver: awslogs
             Options:

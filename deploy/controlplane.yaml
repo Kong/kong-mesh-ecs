@@ -366,11 +366,8 @@ Resources:
             - Name: KMESH_RUNTIME_AWS_ROUTE53_ENABLED
               Value: "true"
             - Name: KMESH_RUNTIME_AWS_ROUTE53_HOSTED_ZONE_ID
-              Value: 
-                Fn::Join:
-                  - ""
-                  - - !ImportValue
-                      Fn::Sub: "${VPCStackName}:HostedZoneId"
+              Value: !ImportValue
+                Fn::Sub: "${VPCStackName}:HostedZoneId"
             - Name: KUMA_DNS_SERVER_CIDR
               Value: "127.1.0.0/16"
             - Name: KUMA_IPAM_MESH_MULTI_ZONE_SERVICE_CIDR

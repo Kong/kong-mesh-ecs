@@ -126,6 +126,15 @@ Resources:
                   - "ec2:DeleteNetworkInterfacePermission"
                   - "ec2:Describe*"
                   - "ec2:DetachNetworkInterface"
+                  - "route53:CreateHostedZone"
+                  - "route53:UpdateHostedZoneComment"
+                  - "route53:GetHostedZone"
+                  - "route53:ListHostedZones"
+                  - "route53:DeleteHostedZone"
+                  - "route53:ChangeResourceRecordSets"
+                  - "route53:ListResourceRecordSets"
+                  - "route53:GetHostedZoneCount"
+                  - "route53:ListHostedZonesByName"
                 Resource: "*"
 
   # This is a role which is used by the ECS tasks themselves.
@@ -160,6 +169,16 @@ Resources:
     Properties:
       Name: !Ref TLD
       Vpc: !Ref VPC
+
+  MyPrivateHostedZone:
+    Type: AWS::Route53::HostedZone
+    Properties:
+      Name: mesh.local
+      HostedZoneConfig:
+        Comment: "Private hosted zone for internal services mesh"
+      VPCs:
+        - VPCId: !Ref "VPC"
+          VPCRegion: !Ref AWS::Region
 
 # These are the values output by the CloudFormation template. Be careful
 # about changing any of them, because of them are exported with specific
@@ -220,3 +239,8 @@ Outputs:
     Value: !Ref TLD
     Export:
       Name: !Join [":", [!Ref AWS::StackName, TLD]]
+  HostedZoneId:
+    Description: The ID of the hosted zone
+    Value: !Ref "MyPrivateHostedZone"
+    Export:
+      Name: !Join [":", [!Ref AWS::StackName, HostedZoneId]]

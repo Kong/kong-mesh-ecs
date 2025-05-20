@@ -40,10 +40,6 @@ Mappings:
             tags:
               kuma.io/service: "{{ service }}"
               kuma.io/protocol: "{{ protocol }}"
-          outbound:
-          - port: {{ redisPort }}
-            tags:
-              kuma.io/service: redis
     Workload:
       # Our demo-app listens on this port
       Port: 5000
@@ -157,6 +153,10 @@ Resources:
           IpProtocol: tcp
           ToPort: !FindInMap [Config, Workload, ExternalPort]
           FromPort: !FindInMap [Config, Workload, ExternalPort]
+        - CidrIp: "10.0.0.0/8"
+          IpProtocol: tcp
+          ToPort: 9901
+          FromPort: 9901
       VpcId:
         Fn::ImportValue: !Join [":", [!Ref "VPCStackName", "VPCId"]]
 
@@ -213,9 +213,9 @@ Resources:
           Image: !FindInMap [Config, Workload, Image]
           Environment:
             - Name: REDIS_HOST
-              Value: 127.0.0.1
+              Value: redis.mesh.local
             - Name: REDIS_PORT
-              Value: !FindInMap [Config, Workload, RedisPort]
+              Value: 8080
           LogConfiguration:
             LogDriver: awslogs
             Options:
@@ -265,6 +265,7 @@ Resources:
                 - --dataplane-var
                 - !Join ["=", [protocol, http]]
                 - --auth-type=aws
+                - --bind-outbounds
           LogConfiguration:
             LogDriver: awslogs
             Options:

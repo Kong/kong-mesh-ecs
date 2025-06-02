@@ -114,6 +114,10 @@ Resources:
           IpProtocol: tcp
           ToPort: !FindInMap [Config, Workload, ExternalPort]
           FromPort: !FindInMap [Config, Workload, ExternalPort]
+        - CidrIp: "10.0.0.0/8"
+          IpProtocol: tcp
+          ToPort: 9901
+          FromPort: 9901
       VpcId:
         Fn::ImportValue: !Join [":", [!Ref VPCStackName, VPCId]]
 
@@ -163,6 +167,8 @@ Resources:
           PortMappings:
             - ContainerPort: !FindInMap [Config, Workload, ExternalPort]
               Protocol: tcp
+            - ContainerPort: 9901
+              Protocol: tcp
           Essential: true
           User: "5678"
           Secrets:
@@ -199,6 +205,7 @@ Resources:
                 - --dataplane-var
                 - !Join ["=", [protocol, tcp]]
                 - --auth-type=aws
+                - --bind-outbounds
           LogConfiguration:
             LogDriver: awslogs
             Options:

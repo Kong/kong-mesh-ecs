@@ -209,7 +209,7 @@ jobs:
     timeout-minutes: 30
     needs: test
     name: "Cleanup after successful test"
-    if: '!inputs.skip-cleanup'
+    if: 'always() && !inputs.skip-cleanup'
     runs-on: ubuntu-latest
     steps:
       - name: Checkout

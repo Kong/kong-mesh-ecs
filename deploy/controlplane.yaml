@@ -402,23 +402,33 @@ Resources:
               Value: 8080
             - Name: KUMA_MULTIZONE_ZONE_NAME
               Value: !Ref ZoneName
-            - Name: KUMA_MULTIZONE_ZONE_GLOBAL_ADDRESS
-              Value: !Ref GlobalKDSAddress
-              Condition: IsMultizone
-            - Name: KUMA_MULTIZONE_ZONE_KDS_TLS_SKIP_VERIFY
-              Value: "true"
-              Condition: IsMultizone
-            - Name: KUMA_EXPERIMENTAL_KDS_DELTA_ENABLED
-              Value: "true"
-              Condition: IsMultizone
-            - Name: KMESH_MULTIZONE_ZONE_KONNECT_CP_ID
-              Value: !Ref KonnectCPId
-              Condition: IsMultizone
-            - Name: KMESH_MULTIZONE_GLOBAL_KDS_AUTH_TYPE
-              Value: "cpToken"
-              Condition: IsMultizone
             - Name: KMESH_MULTIZONE_ZONE_KDS_AUTH_CP_TOKEN_PATH
               Value: /tmp/cp-token
+            - !If
+              - IsMultizone
+              - Name: KUMA_MULTIZONE_ZONE_GLOBAL_ADDRESS
+                Value: !Ref GlobalKDSAddress
+              - !Ref AWS::NoValue
+            - !If
+              - IsMultizone
+              - Name: KUMA_MULTIZONE_ZONE_KDS_TLS_SKIP_VERIFY
+                Value: "true"
+              - !Ref AWS::NoValue
+            - !If
+              - IsMultizone
+              - Name: KUMA_EXPERIMENTAL_KDS_DELTA_ENABLED
+                Value: "true"
+              - !Ref AWS::NoValue
+            - !If
+              - IsMultizone
+              - Name: KMESH_MULTIZONE_ZONE_KONNECT_CP_ID
+                Value: !Ref KonnectCPId
+              - !Ref AWS::NoValue
+            - !If
+              - IsMultizone
+              - Name: KMESH_MULTIZONE_GLOBAL_KDS_AUTH_TYPE
+                Value: "cpToken"
+              - !Ref AWS::NoValue
           Secrets:
             - Name: KMESH_LICENSE
               ValueFrom: !Ref LicenseSecret
@@ -429,8 +439,10 @@ Resources:
             - Name: TLS_KEY
               ValueFrom: !Ref ServerKeySecret
             - Name: KDS_AUTH_CP_TOKEN
-              ValueFrom: !Ref GlobalCPTokenSecret
-              Condition: IsMultizone
+            - !If
+              - IsMultizone
+              - ValueFrom: !Ref GlobalCPTokenSecret
+              - !Ref AWS::NoValue
           EntryPoint:
             - sh
             - -c

@@ -19,6 +19,23 @@ Parameters:
     Default: 1
     Description: Number of CP tasks to run
 
+  ZoneName:
+    Type: String
+    Default: "ecs-demo"
+    Description: Name of this zone
+  GlobalKDSAddress:
+    Type: String
+    Default: ""
+    Description: Address of the global KDS Service
+  GlobalCPTokenSecret:
+    Type: String
+    Default: ""
+    Description: Secret ARN holding the global control plane token
+  KonnectCPId:
+    Type: String
+    Default: ""
+    Description: cpId on the Konnect platform
+
   LicenseSecret:
     Type: String
     Description: Secret ARN holding a Kong Mesh license
@@ -332,7 +349,7 @@ Resources:
           User: root:root # needed for UDP port 53 binding
           Environment:
             - Name: KUMA_MODE
-              Value: standalone
+              Value: zone
             - Name: KMESH_LICENSE_PATH
               Value: /tmp/license.json
             - Name: KUMA_GENERAL_TLS_CERT_FILE
@@ -380,6 +397,20 @@ Resources:
               Value: "mesh.local"
             - Name: KUMA_DNS_SERVER_SERVICE_VIP_PORT
               Value: 8080
+            - Name: KUMA_MULTIZONE_ZONE_NAME
+              Value: !Ref ZoneName
+            - Name: KUMA_MULTIZONE_ZONE_GLOBAL_ADDRESS
+              Value: !Ref GlobalKDSAddress
+            - Name: KUMA_MULTIZONE_ZONE_KDS_TLS_SKIP_VERIFY
+              Value: "true"
+            - Name: KUMA_EXPERIMENTAL_KDS_DELTA_ENABLED
+              Value: "true"
+            - Name: KMESH_MULTIZONE_ZONE_KONNECT_CP_ID
+              Value: !Ref KonnectCPId
+            - Name: KMESH_MULTIZONE_GLOBAL_KDS_AUTH_TYPE
+              Value: "cpToken"
+            - Name: KMESH_MULTIZONE_ZONE_KDS_AUTH_CP_TOKEN_PATH
+              Value: /tmp/cp-token
           Secrets:
             - Name: KMESH_LICENSE
               ValueFrom: !Ref LicenseSecret
@@ -389,10 +420,12 @@ Resources:
               ValueFrom: !Ref ServerCertSecret
             - Name: TLS_KEY
               ValueFrom: !Ref ServerKeySecret
+            - Name: KDS_AUTH_CP_TOKEN
+              ValueFrom: !Ref GlobalCPTokenSecret
           EntryPoint:
             - sh
             - -c
-            - echo "${TLS_CRT}" > "${KUMA_GENERAL_TLS_CERT_FILE}" && echo "${TLS_KEY}" > "${KUMA_GENERAL_TLS_KEY_FILE}" && echo "${KMESH_LICENSE}" > "${KMESH_LICENSE_PATH}"; kuma-cp run
+            - echo "${TLS_CRT}" > "${KUMA_GENERAL_TLS_CERT_FILE}" && echo "${TLS_KEY}" > "${KUMA_GENERAL_TLS_KEY_FILE}" && echo "${KMESH_LICENSE}" > "${KMESH_LICENSE_PATH}" && echo "${KDS_AUTH_CP_TOKEN}" > "${KMESH_MULTIZONE_ZONE_KDS_AUTH_CP_TOKEN_PATH}"; kuma-cp run
           HealthCheck:
             Command:
               [

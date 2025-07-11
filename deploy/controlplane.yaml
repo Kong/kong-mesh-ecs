@@ -46,7 +46,10 @@ Parameters:
   ServerKeySecret:
     Type: String
     Description: ARN of an AWS secret containing a TLS private key for serving control plane traffic
-
+Conditions:
+  IsMultizone: !And
+    - !Not [!Equals [!Ref GlobalKDSAddress, ""]]
+    - !Not [!Equals [!Ref GlobalCPTokenSecret, ""]]
 Resources:
   # Database
   DBSubnetGroup:
@@ -401,14 +404,19 @@ Resources:
               Value: !Ref ZoneName
             - Name: KUMA_MULTIZONE_ZONE_GLOBAL_ADDRESS
               Value: !Ref GlobalKDSAddress
+              Condition: IsMultizone
             - Name: KUMA_MULTIZONE_ZONE_KDS_TLS_SKIP_VERIFY
               Value: "true"
+              Condition: IsMultizone
             - Name: KUMA_EXPERIMENTAL_KDS_DELTA_ENABLED
               Value: "true"
+              Condition: IsMultizone
             - Name: KMESH_MULTIZONE_ZONE_KONNECT_CP_ID
               Value: !Ref KonnectCPId
+              Condition: IsMultizone
             - Name: KMESH_MULTIZONE_GLOBAL_KDS_AUTH_TYPE
               Value: "cpToken"
+              Condition: IsMultizone
             - Name: KMESH_MULTIZONE_ZONE_KDS_AUTH_CP_TOKEN_PATH
               Value: /tmp/cp-token
           Secrets:
@@ -422,6 +430,7 @@ Resources:
               ValueFrom: !Ref ServerKeySecret
             - Name: KDS_AUTH_CP_TOKEN
               ValueFrom: !Ref GlobalCPTokenSecret
+              Condition: IsMultizone
           EntryPoint:
             - sh
             - -c

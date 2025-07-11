@@ -438,10 +438,10 @@ Resources:
               ValueFrom: !Ref ServerCertSecret
             - Name: TLS_KEY
               ValueFrom: !Ref ServerKeySecret
-            - Name: KDS_AUTH_CP_TOKEN
             - !If
               - IsMultizone
-              - ValueFrom: !Ref GlobalCPTokenSecret
+              - Name: KDS_AUTH_CP_TOKEN
+                ValueFrom: !Ref GlobalCPTokenSecret
               - !Ref AWS::NoValue
           EntryPoint:
             - sh

@@ -183,7 +183,10 @@ Resources:
                   - !Ref CPDatabasePassword
                   - !Ref ServerCertSecret
                   - !Ref ServerKeySecret
-                  - !Ref GlobalCPTokenSecret
+                  - !If
+                    - IsMultizone
+                    - !Ref GlobalCPTokenSecret
+                    - !Ref AWS::NoValue
       Path: /
       ManagedPolicyArns:
         - arn:aws:iam::aws:policy/AmazonEC2ContainerRegistryReadOnly

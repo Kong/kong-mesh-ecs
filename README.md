@@ -159,6 +159,34 @@ TLS_CERT=$(
   | jq -r .ARN)
 ```
 
+##### Konnect
+
+If you are deploying a zone that connects to a global control plane on Konnect, please switch `Environment` to **Universal** in the zone creation wizard, extract and copy these items:
+
+1. the KDS sync endpoint of your global control plane (from section **Connect Zone**, under field path `multizone.zone.globalAddress`)
+2. the id of your global control plane  (from section **Connect Zone**, under field path `kmesh.multizone.zone.konnect.cpId`)
+3. the authentication token  (from section **Save token**, line 2)
+
+Export them to variables and files:
+
+```
+# sample value: grpcs://us.mesh.sync.konghq.com:443
+KDS_ADDR=<your global KDS endpoints>
+
+# sample value: 61e5904f-bc3e-401e-9144-d4aa3983a921
+CP_ID=<your CP ID here>
+
+# sample value: spat_7J9SN9TKaeg6Uf3fr7Ms1sCuJ9NUbF4AwXCJlfA7QXJzxM7wg
+echo  "<your auth token here>" > konnect-cp-token
+CP_TOKEN_SECRET=$(
+  aws secretsmanager create-secret \
+      --name ecs-demo/global-cp-token --description "Secret holding the global control plane token on Konnect" \
+      --secret-string file://konnect-cp-token \
+    | jq -r .ARN)
+```
+
+And make sure you attached the exported variables to the stack deployment command below.
+
 #### Deploy stack
 
 ```
@@ -170,6 +198,15 @@ aws cloudformation deploy \
       ServerKeySecret=${TLS_KEY} \
       ServerCertSecret=${TLS_CERT} \
     --template-file deploy/controlplane.yaml
+```
+
+If you are deploying a zone that connects to Konnect, please also attach the following parameters:
+
+```
+      ZoneName=ecs-demo \
+      GlobalKDSAddress=${KDS_ADDR} \
+      GlobalCPTokenSecret=${CP_TOKEN_SECRET}  \
+      KonnectCPId=${CP_ID}  \
 ```
 
 The ECS task fetches an admin API token and saves it in an AWS secret.
@@ -193,6 +230,8 @@ kumactl config control-planes add \
   --auth-conf token=${TOKEN} \
   --ca-cert-file cert.pem
 ```
+
+If you are deploying a zone that connects to Konnect, please follow instructions on Konnect to connect your kumactl to the global control plane.
 
 #### GUI
 

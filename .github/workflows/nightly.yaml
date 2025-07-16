@@ -71,7 +71,7 @@ jobs:
           GH_TOKEN: ${{ steps.github-app-token.outputs.token }}
         run: |
           version="${{ inputs.version }}"
-          if [[ -z "${version}" ]]; then
+          if [[ -z "${version}" ]] || [[ "${version}" == "preview" ]]; then
             version=$(curl --silent -L https://docs.konghq.com/mesh/installer.sh  | VERSION=preview sh -s - --print-version | tail -n1)
           fi
           echo "version=${version}" >> $GITHUB_OUTPUT

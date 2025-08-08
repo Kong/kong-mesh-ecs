@@ -38,7 +38,7 @@ permissions:
 # credentials and then assume the aforementioned IAM role.
 jobs:
   test:
-    timeout-minutes: 30
+    timeout-minutes: 45
     name: "Test Kong Mesh on ECS"
     runs-on: ubuntu-latest
     defaults:

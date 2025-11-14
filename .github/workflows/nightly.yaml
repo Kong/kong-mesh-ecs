@@ -389,17 +389,21 @@ jobs:
         with:
           role-to-assume: arn:aws:iam::${{ secrets.NIGHTLY_AWS_ACCOUNT_ID }}:role/ecs-ci
           aws-region: ${{ matrix.region.aws-region }}
-      - name: Deprovision counter-demo & controller
+      - name: Deprovision counter-demo, redis and ingress
         run: |
           aws cloudformation delete-stack \
             --stack-name ${{ env.stack-prefix}}-demo-app-${{ matrix.region.name }}
           aws cloudformation delete-stack \
             --stack-name ${{ env.stack-prefix}}-redis-${{ matrix.region.name }}
+          aws cloudformation delete-stack \
+            --stack-name ${{ env.stack-prefix}}-ingress-${{ matrix.region.name }}
 
           aws cloudformation wait stack-delete-complete \
             --stack-name ${{ env.stack-prefix}}-demo-app-${{ matrix.region.name }}
           aws cloudformation wait stack-delete-complete \
             --stack-name ${{ env.stack-prefix}}-redis-${{ matrix.region.name }}
+          aws cloudformation wait stack-delete-complete \
+            --stack-name ${{ env.stack-prefix}}-ingress-${{ matrix.region.name }}
       - name: Deprovision control plane
         run: |
           aws cloudformation delete-stack \

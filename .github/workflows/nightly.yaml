@@ -37,12 +37,12 @@ permissions:
 # provider and uses the `configure-aws-credentials` action to obtain short-lived
 # credentials and then assume the aforementioned IAM role.
 #
-# This workflow deploys two Kong Mesh zones (us-west-2 and us-east-2) concurrently,
+# This workflow deploys two Kong Mesh zones (us-west-1 and us-east-2) concurrently,
 # connecting them to a global control plane on Konnect.
 jobs:
   deploy-zone-west:
     timeout-minutes: 30
-    name: "Deploy Zone us-west-2"
+    name: "Deploy Zone us-west-1"
     runs-on: ubuntu-latest
     defaults:
       run:
@@ -60,7 +60,7 @@ jobs:
         uses: aws-actions/configure-aws-credentials@00943011d9042930efac3dcd3a170e4273319bc8 #v5.1.0
         with:
           role-to-assume: arn:aws:iam::${{ secrets.NIGHTLY_AWS_ACCOUNT_ID }}:role/ecs-ci
-          aws-region: us-west-2
+          aws-region: us-west-1
       - name: Generate GitHub app token
         id: github-app-token
         uses: tibdex/github-app-token@3beb63f4bd073e61482598c45c71c1019b59b73a # v2.1.0
@@ -132,7 +132,7 @@ jobs:
               --capabilities CAPABILITY_IAM \
               --stack-name ${{ env.stack-prefix}}-cp-west \
               --parameter-overrides VPCStackName=${{ env.stack-prefix }}-vpc-west \
-                ZoneName=ecs-us-west-2 \
+                ZoneName=ecs-us-west-1 \
                 GlobalKDSAddress=${kds_address} \
                 GlobalCPTokenSecret=$(jq -r .ARN <<< $CP_TOKEN_SECRET) \
                 KonnectCPId=${konnect_cp_id} \
@@ -327,7 +327,7 @@ jobs:
         uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
       - name: Test west zone dataplanes
         run: |
-          echo "Testing us-west-2 zone..."
+          echo "Testing us-west-1 zone..."
           # Connect to Konnect global CP to verify zones and dataplanes
           # This would require kumactl configured to Konnect global CP
           echo "West zone CP: ${{ needs.deploy-zone-west.outputs.cp-addr }}"
@@ -339,7 +339,7 @@ jobs:
         run: |
           sudo apt-get install httpie
 
-          echo "Ensuring open TCP connection to demo app listener in us-west-2..."
+          echo "Ensuring open TCP connection to demo app listener in us-west-1..."
           for i in {1..5}; do
             netcat -w 180 -z ${{ needs.deploy-zone-west.outputs.cp-addr }} 80 || true
           done
@@ -370,7 +370,7 @@ jobs:
       matrix:
         region:
           - name: west
-            aws-region: us-west-2
+            aws-region: us-west-1
             license-secret: ${{ needs.deploy-zone-west.outputs.license-secret }}
             tls-key-secret: ${{ needs.deploy-zone-west.outputs.tls-key-secret }}
             tls-cert-secret: ${{ needs.deploy-zone-west.outputs.tls-cert-secret }}

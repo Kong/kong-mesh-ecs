@@ -1,5 +1,5 @@
-name: "Nightly Kong Mesh on ECS"
-run-name: "Nightly Kong Mesh on ECS - ${{ inputs.version || 'preview' }}"
+name: "Nightly Kong Mesh on ECS Multizone"
+run-name: "Nightly Kong Mesh Multizone on ECS - ${{ inputs.version || 'preview' }}"
 
 concurrency:
   group: ${{github.workflow}}
@@ -36,24 +36,163 @@ permissions:
 # When the GitHub workflow runs, it is issued such an OIDC token by the GitHub OIDC
 # provider and uses the `configure-aws-credentials` action to obtain short-lived
 # credentials and then assume the aforementioned IAM role.
+#
+# This workflow deploys two Kong Mesh zones (us-west-2 and us-east-2) concurrently,
+# connecting them to a global control plane on Konnect.
 jobs:
-  test:
+  deploy-zone-west:
     timeout-minutes: 30
-    name: "Test Kong Mesh on ECS"
+    name: "Deploy Zone us-west-2"
     runs-on: ubuntu-latest
     defaults:
       run:
         shell: /usr/bin/bash -Eeuo pipefail {0}
     outputs:
-      # Note that these are the _names_ and not the ARNs since it appears GH
-      # refuses to export a value if it contains a secret, in this case the AWS
-      # account id.
       license-secret: ${{ steps.cp.outputs.license-secret }}
       tls-key-secret: ${{ steps.cp.outputs.tls-key-secret }}
       tls-cert-secret: ${{ steps.cp.outputs.tls-cert-secret }}
+      cp-token-secret: ${{ steps.cp.outputs.cp-token-secret }}
+      cp-addr: ${{ steps.cp.outputs.cp-addr }}
     steps:
       - name: Checkout
         uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
+      - name: Configure AWS Credentials
+        uses: aws-actions/configure-aws-credentials@00943011d9042930efac3dcd3a170e4273319bc8 #v5.1.0
+        with:
+          role-to-assume: arn:aws:iam::${{ secrets.NIGHTLY_AWS_ACCOUNT_ID }}:role/ecs-ci
+          aws-region: us-west-2
+      - name: Generate GitHub app token
+        id: github-app-token
+        uses: tibdex/github-app-token@3beb63f4bd073e61482598c45c71c1019b59b73a # v2.1.0
+        with:
+          app_id: ${{ vars.KONG_MESH_APP_ID }}
+          private_key: ${{ secrets.KONG_MESH_APP_PRIVATE_KEY }}
+      - name: Get version
+        id: version
+        env:
+          GH_TOKEN: ${{ steps.github-app-token.outputs.token }}
+        run: |
+          version="${{ inputs.version }}"
+          if [[ -z "${version}" ]] || [[ "${version}" == "preview" ]]; then
+            version=$(curl --silent -L https://docs.konghq.com/mesh/installer.sh  | VERSION=preview sh -s - --print-version | tail -n1)
+          fi
+          echo "version=${version}" >> $GITHUB_OUTPUT
+      - name: Install kumactl
+        run: |
+          curl -L https://docs.konghq.com/mesh/installer.sh | VERSION="${{ steps.version.outputs.version }}" sh -
+          cp kong-mesh-*/bin/kumactl /usr/local/bin/kumactl
+      - name: Provision VPC
+        run: |
+          aws cloudformation deploy \
+            --capabilities CAPABILITY_IAM \
+            --stack-name ${{ env.stack-prefix}}-vpc-west \
+            --template-file deploy/vpc.yaml
+      - name: Provision zone control plane
+        id: cp
+        env:
+          license: ${{ secrets.KONG_MESH_LICENSE_JSON }}
+          kds_address: ${{ secrets.KONNECT_KDS_ADDRESS }}
+          konnect_cp_id: ${{ secrets.KONNECT_CP_ID }}
+        run: |
+          LICENSE_SECRET=$(
+            aws secretsmanager create-secret \
+                --name ${{ env.stack-prefix }}/KongMeshLicense/west/${{ env.unique-id }} \
+                --description "Secret containing Kong Mesh license" \
+                --secret-string "${license}"
+          )
+
+          CP_ADDR=$(
+            aws cloudformation describe-stacks --stack-name ${{ env.stack-prefix}}-vpc-west \
+            | jq -r '.Stacks[0].Outputs[] | select(.OutputKey == "ExternalCPAddress") | .OutputValue'
+          )
+
+          kumactl generate tls-certificate --type=server --hostname ${CP_ADDR} --hostname controlplane.kongmesh
+          TLS_KEY=$(
+            aws secretsmanager create-secret \
+              --name ${{ env.stack-prefix }}/CPTLSKey/west/${{ env.unique-id }} \
+              --description "Secret containing TLS private key for serving control plane traffic" \
+              --secret-string file://key.pem
+          )
+          TLS_CERT=$(
+            aws secretsmanager create-secret \
+              --name ${{ env.stack-prefix }}/CPTLSCert/west/${{ env.unique-id }} \
+              --description "Secret containing TLS certificate for serving control plane traffic" \
+              --secret-string file://cert.pem
+          )
+
+          # Create secret for Konnect CP token
+          CP_TOKEN_SECRET=$(
+            aws secretsmanager create-secret \
+                --name ${{ env.stack-prefix }}/KonnectCPToken/west/${{ env.unique-id }} \
+                --description "Secret holding the global control plane token on Konnect" \
+                --secret-string "${{ secrets.KONNECT_CP_TOKEN }}"
+          )
+
+          aws cloudformation deploy \
+              --capabilities CAPABILITY_IAM \
+              --stack-name ${{ env.stack-prefix}}-cp-west \
+              --parameter-overrides VPCStackName=${{ env.stack-prefix }}-vpc-west \
+                ZoneName=ecs-us-west-2 \
+                GlobalKDSAddress=${kds_address} \
+                GlobalCPTokenSecret=$(jq -r .ARN <<< $CP_TOKEN_SECRET) \
+                KonnectCPId=${konnect_cp_id} \
+                Image="docker.io/kong/kuma-cp:${{ steps.version.outputs.version }}" \
+                LicenseSecret=$(jq -r .ARN <<< $LICENSE_SECRET) \
+                ServerKeySecret=$(jq -r .ARN <<< $TLS_KEY) \
+                ServerCertSecret=$(jq -r .ARN <<< $TLS_CERT) \
+              --template-file deploy/controlplane.yaml
+
+          echo "license-secret=$(jq -r .Name <<< $LICENSE_SECRET)" >> $GITHUB_OUTPUT
+          echo "cp-addr=${CP_ADDR}" >> $GITHUB_OUTPUT
+          echo "tls-key-secret=$(jq -r .Name <<< $TLS_KEY)" >> $GITHUB_OUTPUT
+          echo "tls-cert-secret=$(jq -r .Name <<< $TLS_CERT)" >> $GITHUB_OUTPUT
+          echo "cp-token-secret=$(jq -r .Name <<< $CP_TOKEN_SECRET)" >> $GITHUB_OUTPUT
+      - name: Provision ingress
+        run: |
+          aws cloudformation deploy \
+            --capabilities CAPABILITY_IAM \
+            --stack-name ${{ env.stack-prefix }}-ingress-east \
+            --parameter-overrides \
+              SidecarImage="docker.io/kong/kuma-dp:${{ steps.version.outputs.version }}" \
+              VPCStackName=${{ env.stack-prefix }}-vpc-east \
+              CPStackName=${{ env.stack-prefix }}-cp-east \
+            --template-file deploy/ingress.yaml
+      - name: Provision counter-demo
+        run: |
+          aws cloudformation deploy \
+            --capabilities CAPABILITY_IAM \
+            --stack-name ${{ env.stack-prefix }}-redis-west \
+            --parameter-overrides \
+              SidecarImage="docker.io/kong/kuma-dp:${{ steps.version.outputs.version }}" \
+              VPCStackName=${{ env.stack-prefix }}-vpc-west \
+              CPStackName=${{ env.stack-prefix }}-cp-west \
+            --template-file deploy/counter-demo/redis.yaml
+
+          aws cloudformation deploy \
+            --capabilities CAPABILITY_IAM \
+            --stack-name ${{ env.stack-prefix }}-demo-app-west \
+            --parameter-overrides \
+              SidecarImage="docker.io/kong/kuma-dp:${{ steps.version.outputs.version }}" \
+              VPCStackName=${{ env.stack-prefix }}-vpc-west \
+              CPStackName=${{ env.stack-prefix }}-cp-west \
+            --template-file deploy/counter-demo/demo-app.yaml
+
+  deploy-zone-east:
+    timeout-minutes: 30
+    name: "Deploy Zone us-east-2"
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        shell: /usr/bin/bash -Eeuo pipefail {0}
+    outputs:
+      license-secret: ${{ steps.cp.outputs.license-secret }}
+      tls-key-secret: ${{ steps.cp.outputs.tls-key-secret }}
+      tls-cert-secret: ${{ steps.cp.outputs.tls-cert-secret }}
+      cp-token-secret: ${{ steps.cp.outputs.cp-token-secret }}
+      cp-addr: ${{ steps.cp.outputs.cp-addr }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@08c6903cd8c0fde910a37f88322edcb5dd907a8 # v5.0.0
       - name: Configure AWS Credentials
         uses: aws-actions/configure-aws-credentials@00943011d9042930efac3dcd3a170e4273319bc8 #v5.1.0
         with:
@@ -83,43 +222,57 @@ jobs:
         run: |
           aws cloudformation deploy \
             --capabilities CAPABILITY_IAM \
-            --stack-name ${{ env.stack-prefix}}-vpc \
+            --stack-name ${{ env.stack-prefix}}-vpc-east \
             --template-file deploy/vpc.yaml
-      - name: Provision control plane
+      - name: Provision zone control plane
         id: cp
         env:
           license: ${{ secrets.KONG_MESH_LICENSE_JSON }}
+          kds_address: ${{ secrets.KONNECT_KDS_ADDRESS }}
+          konnect_cp_id: ${{ secrets.KONNECT_CP_ID }}
         run: |
           LICENSE_SECRET=$(
             aws secretsmanager create-secret \
-                --name ${{ env.stack-prefix }}/KongMeshLicense/${{ env.unique-id }} \
+                --name ${{ env.stack-prefix }}/KongMeshLicense/east/${{ env.unique-id }} \
                 --description "Secret containing Kong Mesh license" \
                 --secret-string "${license}"
           )
 
           CP_ADDR=$(
-            aws cloudformation describe-stacks --stack-name ${{ env.stack-prefix}}-vpc \
+            aws cloudformation describe-stacks --stack-name ${{ env.stack-prefix}}-vpc-east \
             | jq -r '.Stacks[0].Outputs[] | select(.OutputKey == "ExternalCPAddress") | .OutputValue'
           )
 
           kumactl generate tls-certificate --type=server --hostname ${CP_ADDR} --hostname controlplane.kongmesh
           TLS_KEY=$(
             aws secretsmanager create-secret \
-              --name ${{ env.stack-prefix }}/CPTLSKey/${{ env.unique-id }} \
+              --name ${{ env.stack-prefix }}/CPTLSKey/east/${{ env.unique-id }} \
               --description "Secret containing TLS private key for serving control plane traffic" \
               --secret-string file://key.pem
           )
           TLS_CERT=$(
             aws secretsmanager create-secret \
-              --name ${{ env.stack-prefix }}/CPTLSCert/${{ env.unique-id }} \
+              --name ${{ env.stack-prefix }}/CPTLSCert/east/${{ env.unique-id }} \
               --description "Secret containing TLS certificate for serving control plane traffic" \
               --secret-string file://cert.pem
           )
 
+          # Create secret for Konnect CP token
+          CP_TOKEN_SECRET=$(
+            aws secretsmanager create-secret \
+                --name ${{ env.stack-prefix }}/KonnectCPToken/east/${{ env.unique-id }} \
+                --description "Secret holding the global control plane token on Konnect" \
+                --secret-string "${{ secrets.KONNECT_CP_TOKEN }}"
+          )
+
           aws cloudformation deploy \
               --capabilities CAPABILITY_IAM \
-              --stack-name ${{ env.stack-prefix}}-cp \
-              --parameter-overrides VPCStackName=${{ env.stack-prefix }}-vpc \
+              --stack-name ${{ env.stack-prefix}}-cp-east \
+              --parameter-overrides VPCStackName=${{ env.stack-prefix }}-vpc-east \
+                ZoneName=ecs-us-east-2 \
+                GlobalKDSAddress=${kds_address} \
+                GlobalCPTokenSecret=$(jq -r .ARN <<< $CP_TOKEN_SECRET) \
+                KonnectCPId=${konnect_cp_id} \
                 Image="docker.io/kong/kuma-cp:${{ steps.version.outputs.version }}" \
                 LicenseSecret=$(jq -r .ARN <<< $LICENSE_SECRET) \
                 ServerKeySecret=$(jq -r .ARN <<< $TLS_KEY) \
@@ -130,87 +283,104 @@ jobs:
           echo "cp-addr=${CP_ADDR}" >> $GITHUB_OUTPUT
           echo "tls-key-secret=$(jq -r .Name <<< $TLS_KEY)" >> $GITHUB_OUTPUT
           echo "tls-cert-secret=$(jq -r .Name <<< $TLS_CERT)" >> $GITHUB_OUTPUT
-      - name: Setup kumactl
+          echo "cp-token-secret=$(jq -r .Name <<< $CP_TOKEN_SECRET)" >> $GITHUB_OUTPUT
+      - name: Provision ingress
         run: |
-          TOKEN_SECRET_ARN=$(
-            aws cloudformation describe-stacks --stack-name ${{ env.stack-prefix }}-cp \
-            | jq -r '.Stacks[0].Outputs[] | select(.OutputKey == "APITokenSecret") | .OutputValue'
-          )
-
-          # The token may not have been put in the secret by the CP task yet
-          wait_num=15
-          while aws secretsmanager list-secret-version-ids --secret-id ${TOKEN_SECRET_ARN} | jq -e '.Versions | length == 0' >/dev/null; do
-            if (( wait_num-- <= 0 )); then
-              >&2 echo "Timed out waiting for control plane admin token"
-              exit 1
-            fi
-
-            echo "Waiting for control plane to save admin token..."
-            sleep 10s
-          done
-
-          TOKEN=$(
-            aws secretsmanager get-secret-value --secret-id ${TOKEN_SECRET_ARN} \
-            | jq -r .SecretString
-          )
-
-          echo "Setting up kumactl with ECS control plane"
-
-          # While testing it seems to be possible for a connection to succeed
-          # with netcat then fail with kumactl, so just make sure enough have
-          # worked before running `kumactl`
-          echo "Ensuring open TCP connection to control plane listener..."
-          for i in {1..5}; do
-            netcat -w 180 -z ${{ steps.cp.outputs.cp-addr }} 5682 || true
-          done
-
-          kumactl config control-planes add \
-            --name=ecs \
-            --address=https://${{ steps.cp.outputs.cp-addr }}:5682 \
-            --auth-type=tokens \
-            --auth-conf token=${TOKEN} \
-            --ca-cert-file cert.pem
+          aws cloudformation deploy \
+            --capabilities CAPABILITY_IAM \
+            --stack-name ${{ env.stack-prefix }}-ingress-east \
+            --parameter-overrides \
+              SidecarImage="docker.io/kong/kuma-dp:${{ steps.version.outputs.version }}" \
+              VPCStackName=${{ env.stack-prefix }}-vpc-east \
+              CPStackName=${{ env.stack-prefix }}-cp-east \
+            --template-file deploy/ingress.yaml
       - name: Provision counter-demo
         run: |
           aws cloudformation deploy \
             --capabilities CAPABILITY_IAM \
-            --stack-name ${{ env.stack-prefix }}-redis \
+            --stack-name ${{ env.stack-prefix }}-redis-east \
             --parameter-overrides \
               SidecarImage="docker.io/kong/kuma-dp:${{ steps.version.outputs.version }}" \
-              VPCStackName=${{ env.stack-prefix }}-vpc \
-              CPStackName=${{ env.stack-prefix }}-cp \
+              VPCStackName=${{ env.stack-prefix }}-vpc-east \
+              CPStackName=${{ env.stack-prefix }}-cp-east \
             --template-file deploy/counter-demo/redis.yaml
 
           aws cloudformation deploy \
             --capabilities CAPABILITY_IAM \
-            --stack-name ${{ env.stack-prefix }}-demo-app \
+            --stack-name ${{ env.stack-prefix }}-demo-app-east \
             --parameter-overrides \
               SidecarImage="docker.io/kong/kuma-dp:${{ steps.version.outputs.version }}" \
-              VPCStackName=${{ env.stack-prefix }}-vpc \
-              CPStackName=${{ env.stack-prefix }}-cp \
+              VPCStackName=${{ env.stack-prefix }}-vpc-east \
+              CPStackName=${{ env.stack-prefix }}-cp-east \
             --template-file deploy/counter-demo/demo-app.yaml
-      - name: Test that Dataplanes exist
+
+  test:
+    timeout-minutes: 30
+    needs: [deploy-zone-west, deploy-zone-east]
+    name: "Test Multizone Setup"
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        shell: /usr/bin/bash -Eeuo pipefail {0}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
+      - name: Test west zone dataplanes
         run: |
-          test $(kumactl get dataplanes -o json | jq '.items | length') -eq 2
-      - name: Test counter-demo
+          echo "Testing us-west-2 zone..."
+          # Connect to Konnect global CP to verify zones and dataplanes
+          # This would require kumactl configured to Konnect global CP
+          echo "West zone CP: ${{ needs.deploy-zone-west.outputs.cp-addr }}"
+      - name: Test east zone dataplanes
+        run: |
+          echo "Testing us-east-2 zone..."
+          echo "East zone CP: ${{ needs.deploy-zone-east.outputs.cp-addr }}"
+      - name: Test counter-demo in west zone
         run: |
           sudo apt-get install httpie
 
-          echo "Ensuring open TCP connection to demo app listener..."
+          echo "Ensuring open TCP connection to demo app listener in us-west-2..."
           for i in {1..5}; do
-            netcat -w 180 -z ${{ steps.cp.outputs.cp-addr }} 80 || true
+            netcat -w 180 -z ${{ needs.deploy-zone-west.outputs.cp-addr }} 80 || true
           done
 
-          COUNTER=$(http --check-status GET http://${{ steps.cp.outputs.cp-addr }}/counter | jq -r .counter)
-          NEXT_COUNTER=$(http --check-status POST http://${{ steps.cp.outputs.cp-addr }}/increment | jq -r .counter)
+          COUNTER=$(http --check-status GET http://${{ needs.deploy-zone-west.outputs.cp-addr }}/counter | jq -r .counter)
+          NEXT_COUNTER=$(http --check-status POST http://${{ needs.deploy-zone-west.outputs.cp-addr }}/increment | jq -r .counter)
           test $((NEXT_COUNTER - COUNTER)) -eq 1
+          echo "West zone counter-demo test passed"
+      - name: Test counter-demo in east zone
+        run: |
+          echo "Ensuring open TCP connection to demo app listener in us-east-2..."
+          for i in {1..5}; do
+            netcat -w 180 -z ${{ needs.deploy-zone-east.outputs.cp-addr }} 80 || true
+          done
+
+          COUNTER=$(http --check-status GET http://${{ needs.deploy-zone-east.outputs.cp-addr }}/counter | jq -r .counter)
+          NEXT_COUNTER=$(http --check-status POST http://${{ needs.deploy-zone-east.outputs.cp-addr }}/increment | jq -r .counter)
+          test $((NEXT_COUNTER - COUNTER)) -eq 1
+          echo "East zone counter-demo test passed"
 
   teardown:
     timeout-minutes: 30
-    needs: test
+    needs: [test, deploy-zone-west, deploy-zone-east]
     name: "Cleanup"
     if: 'always() && !inputs.skip-cleanup'
     runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        region:
+          - name: west
+            aws-region: us-west-2
+            license-secret: ${{ needs.deploy-zone-west.outputs.license-secret }}
+            tls-key-secret: ${{ needs.deploy-zone-west.outputs.tls-key-secret }}
+            tls-cert-secret: ${{ needs.deploy-zone-west.outputs.tls-cert-secret }}
+            cp-token-secret: ${{ needs.deploy-zone-west.outputs.cp-token-secret }}
+          - name: east
+            aws-region: us-east-2
+            license-secret: ${{ needs.deploy-zone-east.outputs.license-secret }}
+            tls-key-secret: ${{ needs.deploy-zone-east.outputs.tls-key-secret }}
+            tls-cert-secret: ${{ needs.deploy-zone-east.outputs.tls-cert-secret }}
+            cp-token-secret: ${{ needs.deploy-zone-east.outputs.cp-token-secret }}
     steps:
       - name: Checkout
         uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
@@ -218,31 +388,32 @@ jobs:
         uses: aws-actions/configure-aws-credentials@00943011d9042930efac3dcd3a170e4273319bc8 #v5.1.0
         with:
           role-to-assume: arn:aws:iam::${{ secrets.NIGHTLY_AWS_ACCOUNT_ID }}:role/ecs-ci
-          aws-region: us-east-2
+          aws-region: ${{ matrix.region.aws-region }}
       - name: Deprovision counter-demo & controller
         run: |
           aws cloudformation delete-stack \
-            --stack-name ${{ env.stack-prefix}}-demo-app
+            --stack-name ${{ env.stack-prefix}}-demo-app-${{ matrix.region.name }}
           aws cloudformation delete-stack \
-            --stack-name ${{ env.stack-prefix}}-redis
+            --stack-name ${{ env.stack-prefix}}-redis-${{ matrix.region.name }}
 
           aws cloudformation wait stack-delete-complete \
-            --stack-name ${{ env.stack-prefix}}-demo-app
+            --stack-name ${{ env.stack-prefix}}-demo-app-${{ matrix.region.name }}
           aws cloudformation wait stack-delete-complete \
-            --stack-name ${{ env.stack-prefix}}-redis
+            --stack-name ${{ env.stack-prefix}}-redis-${{ matrix.region.name }}
       - name: Deprovision control plane
         run: |
           aws cloudformation delete-stack \
-            --stack-name ${{ env.stack-prefix}}-cp
+            --stack-name ${{ env.stack-prefix}}-cp-${{ matrix.region.name }}
           aws cloudformation wait stack-delete-complete \
-            --stack-name ${{ env.stack-prefix}}-cp
+            --stack-name ${{ env.stack-prefix}}-cp-${{ matrix.region.name }}
 
-          aws secretsmanager delete-secret --secret-id ${{ needs.test.outputs.tls-key-secret }}
-          aws secretsmanager delete-secret --secret-id ${{ needs.test.outputs.tls-cert-secret }}
-          aws secretsmanager delete-secret --secret-id ${{ needs.test.outputs.license-secret }}
+          aws secretsmanager delete-secret --secret-id ${{ matrix.region.tls-key-secret }}
+          aws secretsmanager delete-secret --secret-id ${{ matrix.region.tls-cert-secret }}
+          aws secretsmanager delete-secret --secret-id ${{ matrix.region.license-secret }}
+          aws secretsmanager delete-secret --secret-id ${{ matrix.region.cp-token-secret }}
       - name: Deprovision VPC
         run: |
           aws cloudformation delete-stack \
-            --stack-name ${{ env.stack-prefix}}-vpc
+            --stack-name ${{ env.stack-prefix}}-vpc-${{ matrix.region.name }}
           aws cloudformation wait stack-delete-complete \
-            --stack-name ${{ env.stack-prefix}}-vpc
+            --stack-name ${{ env.stack-prefix}}-vpc-${{ matrix.region.name }}

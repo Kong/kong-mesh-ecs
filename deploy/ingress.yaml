@@ -1,0 +1,237 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: Frontend for the Kuma Counter Demo
+Parameters:
+  VPCStackName:
+    Type: String
+    Description: Stack used to create the VPC
+  CPStackName:
+    Type: String
+    Description: Cloudformation stack used to provision the control plane.
+  SidecarImage:
+    Type: String
+    Default: "docker.io/kong/kuma-dp:2.1.1"
+    Description: Name of the kuma-dp docker image
+  DesiredCount:
+    Type: String
+    Default: 1
+    Description: Desired replica count of the workload
+  DataplaneSecretPrefix:
+    Type: String
+    Default: "kong-mesh-ecs"
+    Description: Prefix to use for naming dataplane token secrets
+  AllowedCidr:
+    Type: String
+    Default: "10.0.0.0/8"
+    Description: CIDR used to restrict the kuma-cp ports access
+Mappings:
+  Config:
+    Sidecar:
+      Mesh: default
+      Template: |
+        ---
+        type: ZoneIngress
+        name: "{{ dpname }}"
+        networking:
+          address: "{{ address }}"
+          port: 10001
+          advertisedAddress: {{ advertisedAddress }}
+          advertisedPort: {{ advertisedPort }}
+    Workload:
+      Name: zone-ingress
+Resources:
+  DPTokenSecret:
+    Type: AWS::SecretsManager::Secret
+    Properties:
+      Description: Secret containing Kuma ZoneIngress Token
+      Name: !Join ["/", [!Ref DataplaneSecretPrefix, !FindInMap [Config, Workload, Name]]]
+      SecretString: "{}"
+
+  LoadBalancerTargetZoneIngress:
+    Type: AWS::ElasticLoadBalancingV2::TargetGroup
+    Properties:
+      TargetType: ip
+      Port: 10001
+      Protocol: TCP
+      VpcId:
+        Fn::ImportValue: !Join [":", [!Ref VPCStackName, VPCId]]
+
+  LoadBalancerListenerZoneIngress:
+    Type: AWS::ElasticLoadBalancingV2::Listener
+    Properties:
+      LoadBalancerArn:
+        Fn::ImportValue: !Join [":", [!Ref VPCStackName, LoadBalancer]]
+      Port: 10001
+      Protocol: TCP
+      DefaultActions:
+        - Type: forward
+          ForwardConfig:
+            TargetGroups:
+              - TargetGroupArn: !Ref LoadBalancerTargetZoneIngress
+
+  WorkloadTaskExecutionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: [ecs-tasks.amazonaws.com]
+            Action: ["sts:AssumeRole"]
+      Policies:
+        - PolicyName: get-kuma-dp-token-secret
+          PolicyDocument:
+            Statement:
+              - Effect: Allow
+                Action:
+                  - secretsmanager:GetSecretValue
+                Resource:
+                  - !Ref DPTokenSecret
+                  - Fn::ImportValue: !Join [":", [!Ref CPStackName, CPCASecret]]
+      Path: /
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/AmazonEC2ContainerRegistryReadOnly
+        - arn:aws:iam::aws:policy/CloudWatchLogsFullAccess
+
+  WorkloadTaskIamRole:
+    Type: AWS::IAM::Role
+    Properties:
+      Path: /
+      AssumeRolePolicyDocument: |
+        {
+            "Statement": [{
+                "Effect": "Allow",
+                "Principal": { "Service": [ "ecs-tasks.amazonaws.com" ]},
+                "Action": [ "sts:AssumeRole" ]
+            }]
+        }
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/CloudWatchFullAccess
+        - arn:aws:iam::aws:policy/AWSXRayDaemonWriteAccess
+        - arn:aws:iam::aws:policy/AWSAppMeshEnvoyAccess
+      Policies:
+        - PolicyName: allow-ecs-exec
+          PolicyDocument:
+            Statement:
+              Effect: Allow
+              Action:
+                - "ssmmessages:CreateControlChannel"
+                - "ssmmessages:CreateDataChannel"
+                - "ssmmessages:OpenControlChannel"
+                - "ssmmessages:OpenDataChannel"
+              Resource: "*"
+      Tags:
+        - Key: kuma.io/type
+          Value: ingress
+
+  LogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Ref AWS::StackName
+      RetentionInDays: 7
+
+  WorkloadSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: kuma-cp security group
+      SecurityGroupIngress:
+        - CidrIp: "10.0.0.0/8"
+          IpProtocol: tcp
+          ToPort: 10001
+          FromPort: 10001
+        - CidrIp: "10.0.0.0/8"
+          IpProtocol: tcp
+          ToPort: 9901
+          FromPort: 9901
+      VpcId:
+        Fn::ImportValue: !Join [":", [!Ref "VPCStackName", "VPCId"]]
+
+  WorkloadSecurityIngressTcp:
+    Type: AWS::EC2::SecurityGroupIngress
+    Properties:
+      Description: Ingress for ZoneIngress
+      GroupId: !Ref WorkloadSecurityGroup
+      IpProtocol: tcp
+      CidrIp: !Ref AllowedCidr
+      FromPort: 10001
+      ToPort: 10001
+
+  ServiceWorkload:
+    Type: AWS::ECS::Service
+    Properties:
+      LaunchType: FARGATE
+      Cluster:
+        Fn::ImportValue: !Join [":", [!Ref "VPCStackName", "ClusterName"]]
+      DesiredCount: !Ref DesiredCount
+      TaskDefinition: !Ref "TaskDefinitionWorkload"
+      EnableExecuteCommand: true
+      LoadBalancers:
+        - TargetGroupArn: !Ref LoadBalancerTargetZoneIngress
+          ContainerPort: 10001
+          ContainerName: zone-ingress
+      PropagateTags: SERVICE
+      ServiceName: !FindInMap [Config, Workload, Name]
+      NetworkConfiguration:
+        AwsvpcConfiguration:
+          AssignPublicIp: ENABLED
+          Subnets:
+            - Fn::ImportValue:
+                !Join [":", [!Ref "VPCStackName", "PublicSubnet"]]
+          SecurityGroups: [!Ref "WorkloadSecurityGroup"]
+
+  TaskDefinitionWorkload:
+    Type: AWS::ECS::TaskDefinition
+    Properties:
+      Family: !FindInMap [Config, Workload, Name]
+      NetworkMode: awsvpc
+      RequiresCompatibilities:
+        - FARGATE
+      TaskRoleArn: !Ref WorkloadTaskIamRole
+      ExecutionRoleArn: !Ref "WorkloadTaskExecutionRole"
+      Cpu: 256
+      Memory: 512
+      ContainerDefinitions:
+        - Name: zone-ingress
+          Image: !Ref SidecarImage
+          PortMappings:
+            - ContainerPort: 10001
+              Protocol: tcp
+          Essential: true
+          User: "5678"
+          Secrets:
+            - Name: KUMA_CONTROL_PLANE_CA_CERT
+              ValueFrom:
+                Fn::ImportValue: !Join [":", [!Ref CPStackName, CPCASecret]]
+          Environment:
+            - Name: KUMA_DATAPLANE_RUNTIME_RESOURCE
+              Value: !FindInMap [Config, Sidecar, Template]
+          EntryPoint: ["sh", "-c"]
+          Command:
+            - !Join
+              - " "
+              - - kuma-dp
+                - run
+                - --cp-address
+                - Fn::Sub:
+                    - https://${Hostname}:5678
+                    - Hostname:
+                        Fn::ImportValue:
+                          !Join [":", [!Ref CPStackName, CPAddress]]
+                - --dataplane-var
+                - dpname=`hostname -s`
+                - --dataplane-var
+                - address=`hostname -i`
+                - --dataplane-var
+                - Fn::Sub:
+                  - advertisedAddress=${LBAddress}
+                  - LBAddress:
+                      Fn::ImportValue: !Join [":", [!Ref VPCStackName, ExternalCPAddress]]
+                - --dataplane-var
+                - !Join ["=", [advertisedPort, 10001]]
+                - --auth-type=aws
+                - --proxy-type=ingress
+          LogConfiguration:
+            LogDriver: awslogs
+            Options:
+              awslogs-group: !Ref AWS::StackName
+              awslogs-region: !Ref AWS::Region
+              awslogs-stream-prefix: zone-ingress

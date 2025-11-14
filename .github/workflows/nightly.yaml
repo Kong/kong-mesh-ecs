@@ -85,7 +85,7 @@ jobs:
         run: |
           aws cloudformation deploy \
             --capabilities CAPABILITY_IAM \
-            --stack-name ${{ env.stack-prefix}}-vpc-west \
+            --stack-name ${{ env.stack-prefix}}-vpc \
             --template-file deploy/vpc.yaml
       - name: Provision zone control plane
         id: cp
@@ -102,7 +102,7 @@ jobs:
           )
 
           CP_ADDR=$(
-            aws cloudformation describe-stacks --stack-name ${{ env.stack-prefix}}-vpc-west \
+            aws cloudformation describe-stacks --stack-name ${{ env.stack-prefix}}-vpc \
             | jq -r '.Stacks[0].Outputs[] | select(.OutputKey == "ExternalCPAddress") | .OutputValue'
           )
 
@@ -130,8 +130,8 @@ jobs:
 
           aws cloudformation deploy \
               --capabilities CAPABILITY_IAM \
-              --stack-name ${{ env.stack-prefix}}-cp-west \
-              --parameter-overrides VPCStackName=${{ env.stack-prefix }}-vpc-west \
+              --stack-name ${{ env.stack-prefix}}-cp \
+              --parameter-overrides VPCStackName=${{ env.stack-prefix }}-vpc \
                 ZoneName=ecs-us-west-1 \
                 GlobalKDSAddress=${kds_address} \
                 GlobalCPTokenSecret=$(jq -r .ARN <<< $CP_TOKEN_SECRET) \
@@ -151,30 +151,30 @@ jobs:
         run: |
           aws cloudformation deploy \
             --capabilities CAPABILITY_IAM \
-            --stack-name ${{ env.stack-prefix }}-ingress-east \
+            --stack-name ${{ env.stack-prefix }}-ingress \
             --parameter-overrides \
               SidecarImage="docker.io/kong/kuma-dp:${{ steps.version.outputs.version }}" \
-              VPCStackName=${{ env.stack-prefix }}-vpc-east \
-              CPStackName=${{ env.stack-prefix }}-cp-east \
+              VPCStackName=${{ env.stack-prefix }}-vpc \
+              CPStackName=${{ env.stack-prefix }}-cp \
             --template-file deploy/ingress.yaml
       - name: Provision counter-demo
         run: |
           aws cloudformation deploy \
             --capabilities CAPABILITY_IAM \
-            --stack-name ${{ env.stack-prefix }}-redis-west \
+            --stack-name ${{ env.stack-prefix }}-redis \
             --parameter-overrides \
               SidecarImage="docker.io/kong/kuma-dp:${{ steps.version.outputs.version }}" \
-              VPCStackName=${{ env.stack-prefix }}-vpc-west \
-              CPStackName=${{ env.stack-prefix }}-cp-west \
+              VPCStackName=${{ env.stack-prefix }}-vpc \
+              CPStackName=${{ env.stack-prefix }}-cp \
             --template-file deploy/counter-demo/redis.yaml
 
           aws cloudformation deploy \
             --capabilities CAPABILITY_IAM \
-            --stack-name ${{ env.stack-prefix }}-demo-app-west \
+            --stack-name ${{ env.stack-prefix }}-demo-app \
             --parameter-overrides \
               SidecarImage="docker.io/kong/kuma-dp:${{ steps.version.outputs.version }}" \
-              VPCStackName=${{ env.stack-prefix }}-vpc-west \
-              CPStackName=${{ env.stack-prefix }}-cp-west \
+              VPCStackName=${{ env.stack-prefix }}-vpc \
+              CPStackName=${{ env.stack-prefix }}-cp \
             --template-file deploy/counter-demo/demo-app.yaml
 
   deploy-zone-east:
@@ -222,7 +222,7 @@ jobs:
         run: |
           aws cloudformation deploy \
             --capabilities CAPABILITY_IAM \
-            --stack-name ${{ env.stack-prefix}}-vpc-east \
+            --stack-name ${{ env.stack-prefix}}-vpc \
             --template-file deploy/vpc.yaml
       - name: Provision zone control plane
         id: cp
@@ -239,7 +239,7 @@ jobs:
           )
 
           CP_ADDR=$(
-            aws cloudformation describe-stacks --stack-name ${{ env.stack-prefix}}-vpc-east \
+            aws cloudformation describe-stacks --stack-name ${{ env.stack-prefix}}-vpc \
             | jq -r '.Stacks[0].Outputs[] | select(.OutputKey == "ExternalCPAddress") | .OutputValue'
           )
 
@@ -267,8 +267,8 @@ jobs:
 
           aws cloudformation deploy \
               --capabilities CAPABILITY_IAM \
-              --stack-name ${{ env.stack-prefix}}-cp-east \
-              --parameter-overrides VPCStackName=${{ env.stack-prefix }}-vpc-east \
+              --stack-name ${{ env.stack-prefix}}-cp \
+              --parameter-overrides VPCStackName=${{ env.stack-prefix }}-vpc \
                 ZoneName=ecs-us-east-2 \
                 GlobalKDSAddress=${kds_address} \
                 GlobalCPTokenSecret=$(jq -r .ARN <<< $CP_TOKEN_SECRET) \
@@ -288,30 +288,30 @@ jobs:
         run: |
           aws cloudformation deploy \
             --capabilities CAPABILITY_IAM \
-            --stack-name ${{ env.stack-prefix }}-ingress-east \
+            --stack-name ${{ env.stack-prefix }}-ingress \
             --parameter-overrides \
               SidecarImage="docker.io/kong/kuma-dp:${{ steps.version.outputs.version }}" \
-              VPCStackName=${{ env.stack-prefix }}-vpc-east \
-              CPStackName=${{ env.stack-prefix }}-cp-east \
+              VPCStackName=${{ env.stack-prefix }}-vpc \
+              CPStackName=${{ env.stack-prefix }}-cp \
             --template-file deploy/ingress.yaml
       - name: Provision counter-demo
         run: |
           aws cloudformation deploy \
             --capabilities CAPABILITY_IAM \
-            --stack-name ${{ env.stack-prefix }}-redis-east \
+            --stack-name ${{ env.stack-prefix }}-redis \
             --parameter-overrides \
               SidecarImage="docker.io/kong/kuma-dp:${{ steps.version.outputs.version }}" \
-              VPCStackName=${{ env.stack-prefix }}-vpc-east \
-              CPStackName=${{ env.stack-prefix }}-cp-east \
+              VPCStackName=${{ env.stack-prefix }}-vpc \
+              CPStackName=${{ env.stack-prefix }}-cp \
             --template-file deploy/counter-demo/redis.yaml
 
           aws cloudformation deploy \
             --capabilities CAPABILITY_IAM \
-            --stack-name ${{ env.stack-prefix }}-demo-app-east \
+            --stack-name ${{ env.stack-prefix }}-demo-app \
             --parameter-overrides \
               SidecarImage="docker.io/kong/kuma-dp:${{ steps.version.outputs.version }}" \
-              VPCStackName=${{ env.stack-prefix }}-vpc-east \
-              CPStackName=${{ env.stack-prefix }}-cp-east \
+              VPCStackName=${{ env.stack-prefix }}-vpc \
+              CPStackName=${{ env.stack-prefix }}-cp \
             --template-file deploy/counter-demo/demo-app.yaml
 
   test:

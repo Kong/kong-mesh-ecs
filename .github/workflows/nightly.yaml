@@ -409,7 +409,7 @@ jobs:
           kumactl apply -f /tmp/hg-processed.yaml
 
   test:
-    timeout-minutes: 30
+    timeout-minutes: 10
     needs: [deploy-zone-west, deploy-zone-east, apply-policies]
     name: "Test Multizone Setup"
     runs-on: ubuntu-latest
@@ -517,7 +517,7 @@ jobs:
 
   # The only resource that is needed to be removed is a HostnameGenerator since we cannot remove Route53 if we won't remove entries
   cleanup-policies:
-    timeout-minutes: 30
+    timeout-minutes: 10
     needs: [test, apply-policies]
     name: "Cleanup"
     if: 'always() && !inputs.skip-cleanup'
@@ -571,14 +571,12 @@ jobs:
     strategy:
       matrix:
         region:
-          - name: west
-            aws-region: us-west-1
+          - aws-region: us-west-1
             license-secret: ${{ needs.deploy-zone-west.outputs.license-secret }}
             tls-key-secret: ${{ needs.deploy-zone-west.outputs.tls-key-secret }}
             tls-cert-secret: ${{ needs.deploy-zone-west.outputs.tls-cert-secret }}
             cp-token-secret: ${{ needs.deploy-zone-west.outputs.cp-token-secret }}
-          - name: east
-            aws-region: us-east-2
+          - aws-region: us-east-2
             license-secret: ${{ needs.deploy-zone-east.outputs.license-secret }}
             tls-key-secret: ${{ needs.deploy-zone-east.outputs.tls-key-secret }}
             tls-cert-secret: ${{ needs.deploy-zone-east.outputs.tls-cert-secret }}
@@ -601,7 +599,7 @@ jobs:
               --stack-name ${{ env.stack-prefix}}-kv
           fi
           aws cloudformation delete-stack \
-            --stack-name ${{ env.stack-prefix}}-demo-app-${{ matrix.region.name }}
+            --stack-name ${{ env.stack-prefix}}-demo-app
           aws cloudformation delete-stack \
             --stack-name ${{ env.stack-prefix}}-ingress
 

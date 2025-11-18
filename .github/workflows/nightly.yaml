@@ -468,7 +468,7 @@ jobs:
           echo ""
 
           # Test East zone endpoint
-          # This endpoint uses MeshMutliZoneService to the KV which is deployed only in the west zone
+          # This endpoint uses MeshMultiZoneService to the KV which is deployed only in the west zone
           echo "=== Testing /east/demo-app/api/counter ==="
           EAST_RESPONSE=$(http --ignore-stdin GET http://${{ needs.deploy-zone-east.outputs.cp-addr }}:8080/east/demo-app/api/counter)
           EAST_ZONE=$(echo "$EAST_RESPONSE" | jq -r '.zone // "unknown"')
@@ -486,7 +486,7 @@ jobs:
           echo ""
 
           # Test increment in West zone
-          echo "=== Testing POST /west/demo-app/api/increment ==="
+          echo "=== Testing POST /west/demo-app/api/counter ==="
           WEST_INC_RESPONSE=$(http --ignore-stdin POST http://${{ needs.deploy-zone-east.outputs.cp-addr }}:8080/west/demo-app/api/counter)
           WEST_NEW_COUNTER=$(echo "$WEST_INC_RESPONSE" | jq -r '.counter // 0')
 
@@ -499,7 +499,7 @@ jobs:
           echo ""
 
           # Test increment in East zone
-          echo "=== Testing POST /east/demo-app/api/increment ==="
+          echo "=== Testing POST /east/demo-app/api/counter ==="
           EAST_INC_RESPONSE=$(http --ignore-stdin POST http://${{ needs.deploy-zone-east.outputs.cp-addr }}:8080/east/demo-app/api/counter)
           EAST_NEW_COUNTER=$(echo "$EAST_INC_RESPONSE" | jq -r '.counter // 0')
 
@@ -512,14 +512,59 @@ jobs:
           echo ""
 
           echo "=== Cross-Zone Routing Test Summary ==="
-          echo "✓ West zone (/west) correctly routes to us-west-1"
-          echo "✓ East zone (/east) correctly routes to us-east-2"
           echo "✓ Counter increment works in both zones"
           echo "✓ SUCCESS: All cross-zone routing tests passed"
 
+  # The only resource that is needed to be removed is a HostnameGenerator since we cannot remove Route53 if we won't remove entries
+  cleanup-policies:
+    timeout-minutes: 30
+    needs: [test, apply-policies]
+    name: "Cleanup"
+    if: 'always() && !inputs.skip-cleanup'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
+      - name: Generate GitHub app token
+        id: github-app-token
+        uses: tibdex/github-app-token@3beb63f4bd073e61482598c45c71c1019b59b73a # v2.1.0
+        with:
+          app_id: ${{ vars.KONG_MESH_APP_ID }}
+          private_key: ${{ secrets.KONG_MESH_APP_PRIVATE_KEY }}
+      - name: Get version
+        id: version
+        env:
+          GH_TOKEN: ${{ steps.github-app-token.outputs.token }}
+        run: |
+          version="${{ inputs.version }}"
+          if [[ -z "${version}" ]] || [[ "${version}" == "preview" ]]; then
+            version=$(curl --silent -L https://docs.konghq.com/mesh/installer.sh  | VERSION=preview sh -s - --print-version | tail -n1)
+          fi
+          echo "version=${version}" >> $GITHUB_OUTPUT
+      - name: Install kumactl
+        run: |
+          curl -L https://docs.konghq.com/mesh/installer.sh | VERSION="${{ steps.version.outputs.version }}" sh -
+          cp kong-mesh-*/bin/kumactl /usr/local/bin/kumactl
+      - name: Configure kumactl for Konnect
+        env:
+          konnect_token: ${{ secrets.KONNECT_CP_KPAT }}
+          konnect_cp_id: ${{ secrets.KONNECT_CP_ID }}
+        run: |
+          kumactl config control-planes add \
+            --address=https://us.api.konghq.com/v1/mesh/control-planes/${konnect_cp_id}/api \
+            --headers "authorization=Bearer ${konnect_token}" \
+            --name "konnect_ecs-global_us" \
+            --overwrite
+      - name: Cleanup HostnameGenerator
+        run: |
+          kumactl delete hostnamegenerator mzms-hostnames
+          kumactl delete hostnamegenerator ms-local-hostnames
+          kumactl delete hostnamegenerator ms-synced-hostnames
+          kumactl delete hostnamegenerator mes-hostnames
+
   teardown:
     timeout-minutes: 30
-    needs: [test, deploy-zone-west, deploy-zone-east]
+    needs: [test, cleanup-policies, deploy-zone-west, deploy-zone-east]
     name: "Cleanup"
     if: 'always() && !inputs.skip-cleanup'
     runs-on: ubuntu-latest

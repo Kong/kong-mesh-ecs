@@ -1,5 +1,5 @@
 AWSTemplateFormatVersion: "2010-09-09"
-Description: Redis for the Kuma Counter Demo
+Description: KV for the Kuma Counter Demo
 Parameters:
   VPCStackName:
     Type: String
@@ -37,12 +37,12 @@ Mappings:
               kuma.io/service: "{{ service }}"
               kuma.io/protocol: "{{ protocol }}"
     Workload:
-      # redis itself listens on this port
-      Port: 6379
+      # kv itself listens on this port
+      Port: 5050
       # The port we want to expose to our mesh
-      ExternalPort: 16379
-      Image: redis
-      Name: redis
+      ExternalPort: 15050
+      Image: ghcr.io/kumahq/kuma-counter-demo
+      Name: kv
 Resources:
   DPTokenSecret:
     Type: AWS::SecretsManager::Secret
@@ -50,6 +50,28 @@ Resources:
       Description: Secret containing Kuma Dataplane Token
       Name: !Join ["/", [!Ref DataplaneSecretPrefix, !FindInMap [Config, Workload, Name]]]
       SecretString: "{}"
+
+  LoadBalancerTargetKV:
+    Type: AWS::ElasticLoadBalancingV2::TargetGroup
+    Properties:
+      TargetType: ip
+      Port: !FindInMap [Config, Workload, ExternalPort]
+      Protocol: TCP
+      VpcId:
+        Fn::ImportValue: !Join [":", [!Ref VPCStackName, VPCId]]
+
+  LoadBalancerListenerKV:
+    Type: AWS::ElasticLoadBalancingV2::Listener
+    Properties:
+      LoadBalancerArn:
+        Fn::ImportValue: !Join [":", [!Ref VPCStackName, LoadBalancer]]
+      Port: 5050
+      Protocol: TCP
+      DefaultActions:
+        - Type: forward
+          ForwardConfig:
+            TargetGroups:
+              - TargetGroupArn: !Ref LoadBalancerTargetKV
 
   WorkloadTaskExecutionRole:
     Type: AWS::IAM::Role
@@ -129,6 +151,10 @@ Resources:
         Fn::ImportValue: !Join [":", [!Ref VPCStackName, ClusterName]]
       DesiredCount: !Ref DesiredCount
       TaskDefinition: !Ref TaskDefinitionWorkload
+      LoadBalancers:
+        - TargetGroupArn: !Ref LoadBalancerTargetKV
+          ContainerPort: !FindInMap [Config, Workload, ExternalPort]
+          ContainerName: kuma-dp
       PropagateTags: SERVICE
       Tags:
         - Key: kuma.io/service
@@ -203,7 +229,7 @@ Resources:
                 - --dataplane-var
                 - !Join ["=", [service, !FindInMap [Config, Workload, Name]]]
                 - --dataplane-var
-                - !Join ["=", [protocol, tcp]]
+                - !Join ["=", [protocol, http]]
                 - --auth-type=aws
                 - --bind-outbounds
           LogConfiguration:

@@ -53,6 +53,7 @@ jobs:
       tls-cert-secret: ${{ steps.cp.outputs.tls-cert-secret }}
       cp-token-secret: ${{ steps.cp.outputs.cp-token-secret }}
       cp-addr: ${{ steps.cp.outputs.cp-addr }}
+      hosted-zone-id: ${{ steps.vpc.outputs.hosted-zone-id }}
     steps:
       - name: Checkout
         uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
@@ -82,11 +83,19 @@ jobs:
           curl -L https://docs.konghq.com/mesh/installer.sh | VERSION="${{ steps.version.outputs.version }}" sh -
           cp kong-mesh-*/bin/kumactl /usr/local/bin/kumactl
       - name: Provision VPC
+        id: vpc
         run: |
           aws cloudformation deploy \
             --capabilities CAPABILITY_IAM \
             --stack-name ${{ env.stack-prefix}}-vpc \
             --template-file deploy/vpc.yaml
+
+          HOSTED_ZONE_ID=$(
+            aws cloudformation describe-stacks --stack-name ${{ env.stack-prefix}}-vpc \
+            | jq -r '.Stacks[0].Outputs[] | select(.OutputKey == "HostedZoneId") | .OutputValue'
+          )
+
+          echo "hosted-zone-id=${HOSTED_ZONE_ID}" >> $GITHUB_OUTPUT
       - name: Provision zone control plane
         id: cp
         env:
@@ -161,12 +170,12 @@ jobs:
         run: |
           aws cloudformation deploy \
             --capabilities CAPABILITY_IAM \
-            --stack-name ${{ env.stack-prefix }}-redis \
+            --stack-name ${{ env.stack-prefix }}-kv \
             --parameter-overrides \
               SidecarImage="docker.io/kong/kuma-dp:${{ steps.version.outputs.version }}" \
               VPCStackName=${{ env.stack-prefix }}-vpc \
               CPStackName=${{ env.stack-prefix }}-cp \
-            --template-file deploy/counter-demo/redis.yaml
+            --template-file deploy/counter-demo/kv.yaml
 
           aws cloudformation deploy \
             --capabilities CAPABILITY_IAM \
@@ -190,6 +199,7 @@ jobs:
       tls-cert-secret: ${{ steps.cp.outputs.tls-cert-secret }}
       cp-token-secret: ${{ steps.cp.outputs.cp-token-secret }}
       cp-addr: ${{ steps.cp.outputs.cp-addr }}
+      hosted-zone-id: ${{ steps.vpc.outputs.hosted-zone-id }}
     steps:
       - name: Checkout
         uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
@@ -219,11 +229,19 @@ jobs:
           curl -L https://docs.konghq.com/mesh/installer.sh | VERSION="${{ steps.version.outputs.version }}" sh -
           cp kong-mesh-*/bin/kumactl /usr/local/bin/kumactl
       - name: Provision VPC
+        id: vpc
         run: |
           aws cloudformation deploy \
             --capabilities CAPABILITY_IAM \
             --stack-name ${{ env.stack-prefix}}-vpc \
             --template-file deploy/vpc.yaml
+
+          HOSTED_ZONE_ID=$(
+            aws cloudformation describe-stacks --stack-name ${{ env.stack-prefix}}-vpc \
+            | jq -r '.Stacks[0].Outputs[] | select(.OutputKey == "HostedZoneId") | .OutputValue'
+          )
+
+          echo "hosted-zone-id=${HOSTED_ZONE_ID}" >> $GITHUB_OUTPUT
       - name: Provision zone control plane
         id: cp
         env:
@@ -298,12 +316,12 @@ jobs:
         run: |
           aws cloudformation deploy \
             --capabilities CAPABILITY_IAM \
-            --stack-name ${{ env.stack-prefix }}-redis \
+            --stack-name ${{ env.stack-prefix }}-kv \
             --parameter-overrides \
               SidecarImage="docker.io/kong/kuma-dp:${{ steps.version.outputs.version }}" \
               VPCStackName=${{ env.stack-prefix }}-vpc \
               CPStackName=${{ env.stack-prefix }}-cp \
-            --template-file deploy/counter-demo/redis.yaml
+            --template-file deploy/counter-demo/kv.yaml
 
           aws cloudformation deploy \
             --capabilities CAPABILITY_IAM \
@@ -314,9 +332,76 @@ jobs:
               CPStackName=${{ env.stack-prefix }}-cp \
             --template-file deploy/counter-demo/demo-app.yaml
 
+  apply-policies:
+    timeout-minutes: 10
+    needs: [deploy-zone-west, deploy-zone-east]
+    name: "Apply Global Policies"
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        shell: /usr/bin/bash -Eeuo pipefail {0}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
+      - name: Generate GitHub app token
+        id: github-app-token
+        uses: tibdex/github-app-token@3beb63f4bd073e61482598c45c71c1019b59b73a # v2.1.0
+        with:
+          app_id: ${{ vars.KONG_MESH_APP_ID }}
+          private_key: ${{ secrets.KONG_MESH_APP_PRIVATE_KEY }}
+      - name: Get version
+        id: version
+        env:
+          GH_TOKEN: ${{ steps.github-app-token.outputs.token }}
+        run: |
+          version="${{ inputs.version }}"
+          if [[ -z "${version}" ]] || [[ "${version}" == "preview" ]]; then
+            version=$(curl --silent -L https://docs.konghq.com/mesh/installer.sh  | VERSION=preview sh -s - --print-version | tail -n1)
+          fi
+          echo "version=${version}" >> $GITHUB_OUTPUT
+      - name: Install kumactl
+        run: |
+          curl -L https://docs.konghq.com/mesh/installer.sh | VERSION="${{ steps.version.outputs.version }}" sh -
+          cp kong-mesh-*/bin/kumactl /usr/local/bin/kumactl
+      - name: Configure kumactl for Konnect
+        env:
+          konnect_token: ${{ secrets.KONNECT_CP_KPAT }}
+          konnect_cp_id: ${{ secrets.KONNECT_CP_ID }}
+        run: |
+          kumactl config control-planes add \
+            --address=https://us.api.konghq.com/v1/mesh/control-planes/${konnect_cp_id}/api \
+            --headers "authorization=Bearer ${konnect_token}" \
+            --name "konnect_ecs-global_us"
+            --overwrite
+      - name: Process and apply policies
+        env:
+          west_zone_id: ${{ needs.deploy-zone-west.outputs.hosted-zone-id }}
+          east_zone_id: ${{ needs.deploy-zone-east.outputs.hosted-zone-id }}
+        run: |
+          # Replace placeholders in hg.yaml
+          sed -e "s/HOSTED_ZONE_ID_WEST_1/${west_zone_id}/g" \
+              -e "s/HOSTED_ZONE_ID_EAST_2/${east_zone_id}/g" \
+              resources/hg.yaml > /tmp/hg-processed.yaml
+
+          echo "Processed HostnameGenerator configuration:"
+          cat /tmp/hg-processed.yaml
+
+          # Apply policies to global control plane
+          echo "Applying Mesh configuration..."
+          kumactl apply -f resources/mesh.yaml
+
+          echo "Applying MeshTrafficPermission..."
+          kumactl apply -f resources/mtp.yaml
+
+          echo "Applying MeshMultiZoneService..."
+          kumactl apply -f resources/mzms.yaml
+
+          echo "Applying HostnameGenerator with zone-specific hosted zone IDs..."
+          kumactl apply -f /tmp/hg-processed.yaml
+
   test:
     timeout-minutes: 30
-    needs: [deploy-zone-west, deploy-zone-east]
+    needs: [deploy-zone-west, deploy-zone-east, apply-policies]
     name: "Test Multizone Setup"
     runs-on: ubuntu-latest
     defaults:
@@ -344,10 +429,8 @@ jobs:
             netcat -w 180 -z ${{ needs.deploy-zone-west.outputs.cp-addr }} 80 || true
           done
 
-          COUNTER=$(http --check-status GET http://${{ needs.deploy-zone-west.outputs.cp-addr }}/counter | jq -r .counter)
-          NEXT_COUNTER=$(http --check-status POST http://${{ needs.deploy-zone-west.outputs.cp-addr }}/increment | jq -r .counter)
-          test $((NEXT_COUNTER - COUNTER)) -eq 1
-          echo "West zone counter-demo test passed"
+          echo "Set zone name"
+          http --check-status POST http://${{ needs.deploy-zone-west.outputs.cp-addr }}:15050/api/key-value/zone value=us-west-1
       - name: Test counter-demo in east zone
         run: |
           echo "Ensuring open TCP connection to demo app listener in us-east-2..."
@@ -355,10 +438,69 @@ jobs:
             netcat -w 180 -z ${{ needs.deploy-zone-east.outputs.cp-addr }} 80 || true
           done
 
-          COUNTER=$(http --check-status GET http://${{ needs.deploy-zone-east.outputs.cp-addr }}/counter | jq -r .counter)
-          NEXT_COUNTER=$(http --check-status POST http://${{ needs.deploy-zone-east.outputs.cp-addr }}/increment | jq -r .counter)
-          test $((NEXT_COUNTER - COUNTER)) -eq 1
-          echo "East zone counter-demo test passed"
+          echo "Set zone name"
+          http --check-status POST http://${{ needs.deploy-zone-east.outputs.cp-addr }}:15050/api/key-value/zone value=us-east-2
+      - name: Test cross-zone load balancing
+        run: |
+          echo "Testing cross-zone load balancing via multizone service..."
+
+          # Initialize counters for each zone
+          WEST_COUNT=0
+          EAST_COUNT=0
+          UNKNOWN_COUNT=0
+          TOTAL_REQUESTS=10
+
+          for i in $(seq 1 $TOTAL_REQUESTS); do
+            # Make request to counter endpoint (using west zone endpoint as entry point)
+            RESPONSE=$(http --ignore-stdin GET http://${{ needs.deploy-zone-west.outputs.cp-addr }}/api/counter)
+            ZONE=$(echo "$RESPONSE" | jq -r '.zone // "unknown"')
+
+            echo "Request $i: Response from zone: $ZONE"
+
+            # Increment appropriate counter
+            case "$ZONE" in
+              us-west-1)
+                WEST_COUNT=$((WEST_COUNT + 1))
+                ;;
+              us-east-2)
+                EAST_COUNT=$((EAST_COUNT + 1))
+                ;;
+              *)
+                UNKNOWN_COUNT=$((UNKNOWN_COUNT + 1))
+                ;;
+            esac
+
+            sleep 1
+          done
+
+          echo ""
+          echo "=== Cross-Zone Load Balancing Results ==="
+
+          if [ "$WEST_COUNT" -gt 0 ]; then
+            WEST_PCT=$((WEST_COUNT * 100 / TOTAL_REQUESTS))
+            echo "Zone us-west-1: $WEST_COUNT requests (${WEST_PCT}%)"
+          fi
+
+          if [ "$EAST_COUNT" -gt 0 ]; then
+            EAST_PCT=$((EAST_COUNT * 100 / TOTAL_REQUESTS))
+            echo "Zone us-east-2: $EAST_COUNT requests (${EAST_PCT}%)"
+          fi
+
+          if [ "$UNKNOWN_COUNT" -gt 0 ]; then
+            echo "Zone unknown: $UNKNOWN_COUNT requests"
+          fi
+
+          # Verify both zones received requests
+          if [ "$WEST_COUNT" -gt 0 ] && [ "$EAST_COUNT" -gt 0 ]; then
+            echo ""
+            echo "✓ SUCCESS: Traffic distributed across both zones (us-west-1 and us-east-2)"
+          else
+            echo ""
+            echo "✗ FAILURE: Traffic not distributed across both zones"
+            echo "West zone requests: $WEST_COUNT"
+            echo "East zone requests: $EAST_COUNT"
+            exit 1
+          fi
 
   teardown:
     timeout-minutes: 30
@@ -389,19 +531,19 @@ jobs:
         with:
           role-to-assume: arn:aws:iam::${{ secrets.NIGHTLY_AWS_ACCOUNT_ID }}:role/ecs-ci
           aws-region: ${{ matrix.region.aws-region }}
-      - name: Deprovision counter-demo, redis and ingress
+      - name: Deprovision counter-demo, kv and ingress
         run: |
           aws cloudformation delete-stack \
             --stack-name ${{ env.stack-prefix}}-demo-app-${{ matrix.region.name }}
           aws cloudformation delete-stack \
-            --stack-name ${{ env.stack-prefix}}-redis-${{ matrix.region.name }}
+            --stack-name ${{ env.stack-prefix}}-kv-${{ matrix.region.name }}
           aws cloudformation delete-stack \
             --stack-name ${{ env.stack-prefix}}-ingress-${{ matrix.region.name }}
 
           aws cloudformation wait stack-delete-complete \
             --stack-name ${{ env.stack-prefix}}-demo-app-${{ matrix.region.name }}
           aws cloudformation wait stack-delete-complete \
-            --stack-name ${{ env.stack-prefix}}-redis-${{ matrix.region.name }}
+            --stack-name ${{ env.stack-prefix}}-kv-${{ matrix.region.name }}
           aws cloudformation wait stack-delete-complete \
             --stack-name ${{ env.stack-prefix}}-ingress-${{ matrix.region.name }}
       - name: Deprovision control plane

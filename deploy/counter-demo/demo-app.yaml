@@ -42,12 +42,10 @@ Mappings:
               kuma.io/protocol: "{{ protocol }}"
     Workload:
       # Our demo-app listens on this port
-      Port: 5000
+      Port: 5050
       # The port we want to expose to our mesh
       ExternalPort: 15000
-      # The port we want to contact redis on
-      RedisPort: 6379
-      Image:  "thefosk/kuma-demo"
+      Image: ghcr.io/kumahq/kuma-counter-demo
       Name: demo-app
 Resources:
   DPTokenSecret:
@@ -167,8 +165,8 @@ Resources:
       GroupId: !Ref WorkloadSecurityGroup
       IpProtocol: tcp
       CidrIp: !Ref AllowedCidr
-      FromPort: 5000
-      ToPort: 5000
+      FromPort: 5050
+      ToPort: 5050
 
   ServiceWorkload:
     Type: AWS::ECS::Service
@@ -212,10 +210,8 @@ Resources:
           Essential: true
           Image: !FindInMap [Config, Workload, Image]
           Environment:
-            - Name: REDIS_HOST
-              Value: redis.mesh.local
-            - Name: REDIS_PORT
-              Value: 8080
+            - Name: KV_URL
+              Value: kv.mzms.mesh.local:15050
           LogConfiguration:
             LogDriver: awslogs
             Options:
@@ -258,8 +254,6 @@ Resources:
                 - !Join ["=", [port, !FindInMap [Config, Workload, ExternalPort]]]
                 - --dataplane-var
                 - !Join ["=", [servicePort, !FindInMap [Config, Workload, Port]]]
-                - --dataplane-var
-                - !Join ["=", [redisPort, !FindInMap [Config, Workload, RedisPort]]]
                 - --dataplane-var
                 - !Join ["=", [service, !FindInMap [Config, Workload, Name]]]
                 - --dataplane-var

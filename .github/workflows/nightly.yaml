@@ -316,21 +316,21 @@ jobs:
         run: |
           aws cloudformation deploy \
             --capabilities CAPABILITY_IAM \
-            --stack-name ${{ env.stack-prefix }}-kv \
-            --parameter-overrides \
-              SidecarImage="docker.io/kong/kuma-dp:${{ steps.version.outputs.version }}" \
-              VPCStackName=${{ env.stack-prefix }}-vpc \
-              CPStackName=${{ env.stack-prefix }}-cp \
-            --template-file deploy/counter-demo/kv.yaml
-
-          aws cloudformation deploy \
-            --capabilities CAPABILITY_IAM \
             --stack-name ${{ env.stack-prefix }}-demo-app \
             --parameter-overrides \
               SidecarImage="docker.io/kong/kuma-dp:${{ steps.version.outputs.version }}" \
               VPCStackName=${{ env.stack-prefix }}-vpc \
               CPStackName=${{ env.stack-prefix }}-cp \
             --template-file deploy/counter-demo/demo-app.yaml
+
+          aws cloudformation deploy \
+            --capabilities CAPABILITY_IAM \
+            --stack-name ${{ env.stack-prefix }}-gateway \
+            --parameter-overrides \
+              SidecarImage="docker.io/kong/kuma-dp:${{ steps.version.outputs.version }}" \
+              VPCStackName=${{ env.stack-prefix }}-vpc \
+              CPStackName=${{ env.stack-prefix }}-cp \
+            --template-file deploy/counter-demo/gateway.yaml
 
   apply-policies:
     timeout-minutes: 10
@@ -371,7 +371,7 @@ jobs:
           kumactl config control-planes add \
             --address=https://us.api.konghq.com/v1/mesh/control-planes/${konnect_cp_id}/api \
             --headers "authorization=Bearer ${konnect_token}" \
-            --name "konnect_ecs-global_us"
+            --name "konnect_ecs-global_us" \
             --overwrite
       - name: Process and apply policies
         env:
@@ -395,6 +395,15 @@ jobs:
 
           echo "Applying MeshMultiZoneService..."
           kumactl apply -f resources/mzms.yaml
+
+          echo "Applying MeshLoadBalancingStrategy..."
+          kumactl apply -f resources/mlbs.yaml
+
+          echo "Applying MeshGateway..."
+          kumactl apply -f resources/meshgateway.yaml
+
+          echo "Applying MeshHTTPRoute..."
+          kumactl apply -f resources/mhttpr.yaml
 
           echo "Applying HostnameGenerator with zone-specific hosted zone IDs..."
           kumactl apply -f /tmp/hg-processed.yaml
@@ -420,7 +429,7 @@ jobs:
         run: |
           echo "Testing us-east-2 zone..."
           echo "East zone CP: ${{ needs.deploy-zone-east.outputs.cp-addr }}"
-      - name: Test counter-demo in west zone
+      - name: Setup KV store zones names
         run: |
           sudo apt-get install httpie
 
@@ -429,78 +438,84 @@ jobs:
             netcat -w 180 -z ${{ needs.deploy-zone-west.outputs.cp-addr }} 80 || true
           done
 
-          echo "Set zone name"
-          http --check-status POST http://${{ needs.deploy-zone-west.outputs.cp-addr }}:15050/api/key-value/zone value=us-west-1
-      - name: Test counter-demo in east zone
-        run: |
           echo "Ensuring open TCP connection to demo app listener in us-east-2..."
           for i in {1..5}; do
             netcat -w 180 -z ${{ needs.deploy-zone-east.outputs.cp-addr }} 80 || true
           done
 
-          echo "Set zone name"
-          http --check-status POST http://${{ needs.deploy-zone-east.outputs.cp-addr }}:15050/api/key-value/zone value=us-east-2
-      - name: Test cross-zone load balancing
+          echo "Set zone name for us-west-1"
+          http --check-status POST http://${{ needs.deploy-zone-east.outputs.cp-addr }}:8080/west/kv/key-value/zone value=us-west-1
+      - name: Test cross-zone routing via ingress
         run: |
-          echo "Testing cross-zone load balancing via multizone service..."
-
-          # Initialize counters for each zone
-          WEST_COUNT=0
-          EAST_COUNT=0
-          UNKNOWN_COUNT=0
-          TOTAL_REQUESTS=10
-
-          for i in $(seq 1 $TOTAL_REQUESTS); do
-            # Make request to counter endpoint (using west zone endpoint as entry point)
-            RESPONSE=$(http --ignore-stdin GET http://${{ needs.deploy-zone-west.outputs.cp-addr }}/api/counter)
-            ZONE=$(echo "$RESPONSE" | jq -r '.zone // "unknown"')
-
-            echo "Request $i: Response from zone: $ZONE"
-
-            # Increment appropriate counter
-            case "$ZONE" in
-              us-west-1)
-                WEST_COUNT=$((WEST_COUNT + 1))
-                ;;
-              us-east-2)
-                EAST_COUNT=$((EAST_COUNT + 1))
-                ;;
-              *)
-                UNKNOWN_COUNT=$((UNKNOWN_COUNT + 1))
-                ;;
-            esac
-
-            sleep 1
-          done
-
+          echo "Testing cross-zone routing via zone ingress..."
           echo ""
-          echo "=== Cross-Zone Load Balancing Results ==="
 
-          if [ "$WEST_COUNT" -gt 0 ]; then
-            WEST_PCT=$((WEST_COUNT * 100 / TOTAL_REQUESTS))
-            echo "Zone us-west-1: $WEST_COUNT requests (${WEST_PCT}%)"
-          fi
+          # Test West zone endpoint
+          echo "=== Testing /west/demo-app/api/counter ==="
+          WEST_RESPONSE=$(http --ignore-stdin GET http://${{ needs.deploy-zone-east.outputs.cp-addr }}:8080/west/demo-app/api/counter)
+          WEST_ZONE=$(echo "$WEST_RESPONSE" | jq -r '.zone // "unknown"')
+          WEST_COUNTER=$(echo "$WEST_RESPONSE" | jq -r '.counter // 0')
 
-          if [ "$EAST_COUNT" -gt 0 ]; then
-            EAST_PCT=$((EAST_COUNT * 100 / TOTAL_REQUESTS))
-            echo "Zone us-east-2: $EAST_COUNT requests (${EAST_PCT}%)"
-          fi
+          echo "Response from /west endpoint:"
+          echo "  Zone: $WEST_ZONE"
+          echo "  Counter: $WEST_COUNTER"
 
-          if [ "$UNKNOWN_COUNT" -gt 0 ]; then
-            echo "Zone unknown: $UNKNOWN_COUNT requests"
-          fi
-
-          # Verify both zones received requests
-          if [ "$WEST_COUNT" -gt 0 ] && [ "$EAST_COUNT" -gt 0 ]; then
-            echo ""
-            echo "✓ SUCCESS: Traffic distributed across both zones (us-west-1 and us-east-2)"
-          else
-            echo ""
-            echo "✗ FAILURE: Traffic not distributed across both zones"
-            echo "West zone requests: $WEST_COUNT"
-            echo "East zone requests: $EAST_COUNT"
+          if [ "$WEST_ZONE" != "us-west-1" ]; then
+            echo "✗ FAILURE: Expected zone 'us-west-1' but got '$WEST_ZONE'"
             exit 1
           fi
+          echo "✓ West zone routing correct"
+          echo ""
+
+          # Test East zone endpoint
+          # This endpoint uses MeshMutliZoneService to the KV which is deployed only in the west zone
+          echo "=== Testing /east/demo-app/api/counter ==="
+          EAST_RESPONSE=$(http --ignore-stdin GET http://${{ needs.deploy-zone-east.outputs.cp-addr }}:8080/east/demo-app/api/counter)
+          EAST_ZONE=$(echo "$EAST_RESPONSE" | jq -r '.zone // "unknown"')
+          EAST_COUNTER=$(echo "$EAST_RESPONSE" | jq -r '.counter // 0')
+
+          echo "Response from /east endpoint:"
+          echo "  Zone: $EAST_ZONE"
+          echo "  Counter: $EAST_COUNTER"
+
+          if [ "$EAST_ZONE" != "us-west-1" ]; then
+            echo "✗ FAILURE: Expected zone 'us-west-1' but got '$EAST_ZONE'"
+            exit 1
+          fi
+          echo "✓ East zone routing correct"
+          echo ""
+
+          # Test increment in West zone
+          echo "=== Testing POST /west/demo-app/api/increment ==="
+          WEST_INC_RESPONSE=$(http --ignore-stdin POST http://${{ needs.deploy-zone-east.outputs.cp-addr }}:8080/west/demo-app/api/counter)
+          WEST_NEW_COUNTER=$(echo "$WEST_INC_RESPONSE" | jq -r '.counter // 0')
+
+          echo "Counter after increment in West: $WEST_NEW_COUNTER"
+          if [ "$WEST_NEW_COUNTER" -le "$WEST_COUNTER" ]; then
+            echo "✗ FAILURE: Counter did not increment in West zone (was $WEST_COUNTER, now $WEST_NEW_COUNTER)"
+            exit 1
+          fi
+          echo "✓ West zone increment successful ($WEST_COUNTER → $WEST_NEW_COUNTER)"
+          echo ""
+
+          # Test increment in East zone
+          echo "=== Testing POST /east/demo-app/api/increment ==="
+          EAST_INC_RESPONSE=$(http --ignore-stdin POST http://${{ needs.deploy-zone-east.outputs.cp-addr }}:8080/east/demo-app/api/counter)
+          EAST_NEW_COUNTER=$(echo "$EAST_INC_RESPONSE" | jq -r '.counter // 0')
+
+          echo "Counter after increment in East: $EAST_NEW_COUNTER"
+          if [ "$EAST_NEW_COUNTER" -le "$EAST_COUNTER" ]; then
+            echo "✗ FAILURE: Counter did not increment in East zone (was $EAST_COUNTER, now $EAST_NEW_COUNTER)"
+            exit 1
+          fi
+          echo "✓ East zone increment successful ($EAST_COUNTER → $EAST_NEW_COUNTER)"
+          echo ""
+
+          echo "=== Cross-Zone Routing Test Summary ==="
+          echo "✓ West zone (/west) correctly routes to us-west-1"
+          echo "✓ East zone (/east) correctly routes to us-east-2"
+          echo "✓ Counter increment works in both zones"
+          echo "✓ SUCCESS: All cross-zone routing tests passed"
 
   teardown:
     timeout-minutes: 30
@@ -533,25 +548,36 @@ jobs:
           aws-region: ${{ matrix.region.aws-region }}
       - name: Deprovision counter-demo, kv and ingress
         run: |
+          if [ "${{ matrix.region.aws-region }}" == "us-east-2" ]; then
+            aws cloudformation delete-stack \
+              --stack-name ${{ env.stack-prefix}}-gateway
+          else
+            aws cloudformation delete-stack \
+              --stack-name ${{ env.stack-prefix}}-kv
+          fi
           aws cloudformation delete-stack \
             --stack-name ${{ env.stack-prefix}}-demo-app-${{ matrix.region.name }}
           aws cloudformation delete-stack \
-            --stack-name ${{ env.stack-prefix}}-kv-${{ matrix.region.name }}
-          aws cloudformation delete-stack \
-            --stack-name ${{ env.stack-prefix}}-ingress-${{ matrix.region.name }}
+            --stack-name ${{ env.stack-prefix}}-ingress
+
 
           aws cloudformation wait stack-delete-complete \
-            --stack-name ${{ env.stack-prefix}}-demo-app-${{ matrix.region.name }}
+            --stack-name ${{ env.stack-prefix}}-demo-app
+          if [ "${{ matrix.region.aws-region }}" == "us-east-2" ]; then
+            aws cloudformation wait stack-delete-complete \
+              --stack-name ${{ env.stack-prefix}}-gateway
+          else
+            aws cloudformation wait stack-delete-complete \
+              --stack-name ${{ env.stack-prefix}}-kv
+          fi
           aws cloudformation wait stack-delete-complete \
-            --stack-name ${{ env.stack-prefix}}-kv-${{ matrix.region.name }}
-          aws cloudformation wait stack-delete-complete \
-            --stack-name ${{ env.stack-prefix}}-ingress-${{ matrix.region.name }}
+            --stack-name ${{ env.stack-prefix}}-ingress
       - name: Deprovision control plane
         run: |
           aws cloudformation delete-stack \
-            --stack-name ${{ env.stack-prefix}}-cp-${{ matrix.region.name }}
+            --stack-name ${{ env.stack-prefix}}-cp
           aws cloudformation wait stack-delete-complete \
-            --stack-name ${{ env.stack-prefix}}-cp-${{ matrix.region.name }}
+            --stack-name ${{ env.stack-prefix}}-cp
 
           aws secretsmanager delete-secret --secret-id ${{ matrix.region.tls-key-secret }}
           aws secretsmanager delete-secret --secret-id ${{ matrix.region.tls-cert-secret }}
@@ -560,6 +586,6 @@ jobs:
       - name: Deprovision VPC
         run: |
           aws cloudformation delete-stack \
-            --stack-name ${{ env.stack-prefix}}-vpc-${{ matrix.region.name }}
+            --stack-name ${{ env.stack-prefix}}-vpc
           aws cloudformation wait stack-delete-complete \
-            --stack-name ${{ env.stack-prefix}}-vpc-${{ matrix.region.name }}
+            --stack-name ${{ env.stack-prefix}}-vpc

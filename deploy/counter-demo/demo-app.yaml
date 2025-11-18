@@ -211,7 +211,7 @@ Resources:
           Image: !FindInMap [Config, Workload, Image]
           Environment:
             - Name: KV_URL
-              Value: kv.mzms.mesh.local:15050
+              Value: http://kv.mzms.mesh.local:15050
           LogConfiguration:
             LogDriver: awslogs
             Options:

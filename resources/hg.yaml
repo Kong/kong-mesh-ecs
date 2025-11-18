@@ -1,0 +1,67 @@
+---
+type: HostnameGenerator
+name: mzms-hostnames
+spec:
+  selector:
+    meshMultiZoneService:
+      matchLabels:
+        kuma.io/origin: global
+  template: "{{ .DisplayName }}.mzms.mesh.local"
+  extension:
+    type: Route53
+    config:
+      hostedZones:
+        - name: ecs-us-east-2
+          hostedZoneId: HOSTED_ZONE_ID_EAST_2
+        - name: ecs-us-west-1
+          hostedZoneId: HOSTED_ZONE_ID_WEST_1
+---
+type: HostnameGenerator
+name: ms-local-hostnames
+spec:
+  selector:
+    meshService:
+      matchLabels:
+        kuma.io/origin: zone
+  template: "{{ .DisplayName }}.svc.mesh.local"
+  extension:
+    type: Route53
+    config:
+      hostedZones:
+        - name: ecs-us-east-2
+          hostedZoneId: HOSTED_ZONE_ID_EAST_2
+        - name: ecs-us-west-1
+          hostedZoneId: HOSTED_ZONE_ID_WEST_1
+---
+type: HostnameGenerator
+name: ms-synced-hostnames
+spec:
+  selector:
+    meshService:
+      matchLabels:
+        kuma.io/origin: global
+  template: "{{ .DisplayName }}.{{ .Zone }}.svc.mesh.local"
+  extension:
+    type: Route53
+    config:
+      hostedZones:
+        - name: ecs-us-east-2
+          hostedZoneId: HOSTED_ZONE_ID_EAST_2
+        - name: ecs-us-west-1
+          hostedZoneId: HOSTED_ZONE_ID_WEST_1
+---
+type: HostnameGenerator
+name: mes-hostnames
+spec:
+  selector:
+    meshExternalService:
+      matchLabels: {}
+  template: "{{ .DisplayName }}.extsvc.mesh.local"
+  extension:
+    type: Route53
+    config:
+      hostedZones:
+        - name: ecs-us-east-2
+          hostedZoneId: HOSTED_ZONE_ID_EAST_2
+        - name: ecs-us-west-1
+          hostedZoneId: HOSTED_ZONE_ID_WEST_1

@@ -1,0 +1,11 @@
+type: MeshMultiZoneService
+name: kv
+mesh: default
+spec:
+  selector:
+    meshService:
+      matchLabels:
+        kuma.io/display-name: kv
+  ports:
+  - port: 15050
+    appProtocol: http

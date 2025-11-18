@@ -1,0 +1,13 @@
+type: MeshLoadBalancingStrategy
+name: disable-la-to-kv
+mesh: default
+spec:
+  to:
+  - targetRef:
+      kind: MeshMultiZoneService
+      labels:
+        kuma.io/display-name: kv
+      sectionName: '15050'
+    default:
+      localityAwareness:
+        disabled: true

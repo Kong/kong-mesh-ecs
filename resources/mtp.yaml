@@ -1,0 +1,11 @@
+type: MeshTrafficPermission
+name: allow-all
+mesh: default
+spec:
+  targetRef:
+    kind: Mesh
+  from:
+  - targetRef:
+      kind: Mesh
+    default:
+      action: Allow

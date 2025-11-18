@@ -1,0 +1,73 @@
+---
+type: MeshHTTPRoute
+name: edge-gateway-route
+mesh: default
+spec:
+  targetRef:
+    kind: MeshGateway
+    name: edge-gateway
+    tags:
+      port: http-8080
+  to:
+  - targetRef:
+      kind: Mesh
+    hostnames:
+    - '*'
+    rules:
+    - matches:
+      - path:
+          type: PathPrefix
+          value: "/east/demo-app"
+      default:
+        filters:
+          - type: URLRewrite
+            urlRewrite:
+              path:
+                type: ReplacePrefixMatch
+                replacePrefixMatch: /
+        backendRefs:
+        - kind: MeshService
+          labels:
+            kuma.io/display-name: demo-app
+            kuma.io/zone: ecs-us-east-2
+          port: 15000
+  - targetRef:
+      kind: Mesh
+    hostnames:
+    - '*'
+    rules:
+    - matches:
+      - path:
+          type: PathPrefix
+          value: "/west/demo-app"
+      default:
+        filters:
+          - type: URLRewrite
+            urlRewrite:
+              path:
+                type: ReplacePrefixMatch
+                replacePrefixMatch: /      
+        backendRefs:
+        - kind: MeshService
+          labels:
+            kuma.io/display-name: demo-app
+            kuma.io/zone: ecs-us-west-1
+          port: 15000
+    - matches:
+      - path:
+          type: PathPrefix
+          value: "/west/kv"
+      default:
+        filters:
+          - type: URLRewrite
+            urlRewrite:
+              path:
+                type: ReplacePrefixMatch
+                replacePrefixMatch: /api
+        backendRefs:
+        - kind: MeshService
+          labels:
+            kuma.io/display-name: kv
+            kuma.io/zone: ecs-us-west-1
+          port: 15050
+          

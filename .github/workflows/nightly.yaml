@@ -444,7 +444,7 @@ jobs:
           done
 
           echo "Set zone name for us-west-1"
-          http --check-status POST http://${{ needs.deploy-zone-east.outputs.cp-addr }}:8080/west/kv/key-value/zone value=us-west-1
+          http --ignore-stdin --check-status POST http://${{ needs.deploy-zone-east.outputs.cp-addr }}:8080/west/kv/key-value/zone value=us-west-1
       - name: Test cross-zone routing via ingress
         run: |
           echo "Testing cross-zone routing via zone ingress..."

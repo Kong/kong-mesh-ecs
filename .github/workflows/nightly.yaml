@@ -166,7 +166,7 @@ jobs:
               VPCStackName=${{ env.stack-prefix }}-vpc \
               CPStackName=${{ env.stack-prefix }}-cp \
             --template-file deploy/ingress.yaml
-      - name: Provision counter-demo
+      - name: Provision kv
         run: |
           aws cloudformation deploy \
             --capabilities CAPABILITY_IAM \
@@ -176,7 +176,8 @@ jobs:
               VPCStackName=${{ env.stack-prefix }}-vpc \
               CPStackName=${{ env.stack-prefix }}-cp \
             --template-file deploy/counter-demo/kv.yaml
-
+      - name: Provision demo-app
+        run: |
           aws cloudformation deploy \
             --capabilities CAPABILITY_IAM \
             --stack-name ${{ env.stack-prefix }}-demo-app \
@@ -322,7 +323,8 @@ jobs:
               VPCStackName=${{ env.stack-prefix }}-vpc \
               CPStackName=${{ env.stack-prefix }}-cp \
             --template-file deploy/counter-demo/demo-app.yaml
-
+      - name: Provision gateway
+        run: |
           aws cloudformation deploy \
             --capabilities CAPABILITY_IAM \
             --stack-name ${{ env.stack-prefix }}-gateway \
@@ -628,7 +630,12 @@ jobs:
           aws secretsmanager delete-secret --secret-id ${{ matrix.region.cp-token-secret }}
       - name: Deprovision VPC
         run: |
-          aws cloudformation delete-stack \
-            --stack-name ${{ env.stack-prefix}}-vpc
+          echo "Attempting to delete VPC stack..."
+          if ! aws cloudformation delete-stack --stack-name ${{ env.stack-prefix}}-vpc; then
+            echo "Initial VPC delete failed, retrying with FORCE_DELETE_STACK mode..."
+            aws cloudformation delete-stack \
+              --stack-name ${{ env.stack-prefix}}-vpc \
+              --deletion-mode FORCE_DELETE_STACK
+          fi
           aws cloudformation wait stack-delete-complete \
             --stack-name ${{ env.stack-prefix}}-vpc

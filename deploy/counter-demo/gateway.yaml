@@ -1,3 +1,4 @@
+# MeshGateway needs to be applied before because the LB healthCheck won't pass
 AWSTemplateFormatVersion: "2010-09-09"
 Description: Gateway for the Kuma Counter Demo
 Parameters:

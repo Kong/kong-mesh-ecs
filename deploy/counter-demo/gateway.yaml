@@ -1,5 +1,6 @@
+# MeshGateway needs to be applied before because the LB healthCheck won't pass
 AWSTemplateFormatVersion: "2010-09-09"
-Description: Frontend for the Kuma Counter Demo
+Description: Gateway for the Kuma Counter Demo
 Parameters:
   VPCStackName:
     Type: String
@@ -31,51 +32,44 @@ Mappings:
         ---
         type: Dataplane
         name: "{{ dpname }}"
-        mesh: "{{ mesh }}"
+        mesh: default
         networking:
           address: "{{ address }}"
-          inbound:
-          - port: {{ port }}
-            servicePort: {{ servicePort }}
+          gateway:
+            type: BUILTIN
             tags:
-              kuma.io/service: "{{ service }}"
-              kuma.io/protocol: "{{ protocol }}"
+              kuma.io/service: edge-gateway
     Workload:
-      # Our demo-app listens on this port
-      Port: 5050
-      # The port we want to expose to our mesh
-      ExternalPort: 15000
-      Image: ghcr.io/kumahq/kuma-counter-demo
-      Name: demo-app
+      Name: edge-gateway
 Resources:
   DPTokenSecret:
     Type: AWS::SecretsManager::Secret
     Properties:
-      Description: Secret containing Kuma Dataplane Token
+      Description: Secret containing Kuma Gateway Token
       Name: !Join ["/", [!Ref DataplaneSecretPrefix, !FindInMap [Config, Workload, Name]]]
       SecretString: "{}"
 
-  LoadBalancerTargetDemoApp:
+  LoadBalancerTargetGateway:
     Type: AWS::ElasticLoadBalancingV2::TargetGroup
     Properties:
       TargetType: ip
-      Port: !FindInMap [Config, Workload, ExternalPort]
+      Port: 8080
       Protocol: TCP
       VpcId:
         Fn::ImportValue: !Join [":", [!Ref VPCStackName, VPCId]]
 
-  LoadBalancerListenerDemoApp:
+  LoadBalancerListenerGateway:
     Type: AWS::ElasticLoadBalancingV2::Listener
     Properties:
       LoadBalancerArn:
         Fn::ImportValue: !Join [":", [!Ref VPCStackName, LoadBalancer]]
-      Port: 80
+      Port: 8080
       Protocol: TCP
       DefaultActions:
         - Type: forward
           ForwardConfig:
             TargetGroups:
-              - TargetGroupArn: !Ref LoadBalancerTargetDemoApp
+              - TargetGroupArn: !Ref LoadBalancerTargetGateway
 
   WorkloadTaskExecutionRole:
     Type: AWS::IAM::Role
@@ -149,8 +143,8 @@ Resources:
       SecurityGroupIngress:
         - CidrIp: "10.0.0.0/8"
           IpProtocol: tcp
-          ToPort: !FindInMap [Config, Workload, ExternalPort]
-          FromPort: !FindInMap [Config, Workload, ExternalPort]
+          ToPort: 8080
+          FromPort: 8080
         - CidrIp: "10.0.0.0/8"
           IpProtocol: tcp
           ToPort: 9901
@@ -161,12 +155,12 @@ Resources:
   WorkloadSecurityIngressTcp:
     Type: AWS::EC2::SecurityGroupIngress
     Properties:
-      Description: Ingress for demo-app
+      Description: Ingress for Gateway
       GroupId: !Ref WorkloadSecurityGroup
       IpProtocol: tcp
       CidrIp: !Ref AllowedCidr
-      FromPort: 5050
-      ToPort: 5050
+      FromPort: 8080
+      ToPort: 8080
 
   ServiceWorkload:
     Type: AWS::ECS::Service
@@ -178,13 +172,10 @@ Resources:
       TaskDefinition: !Ref "TaskDefinitionWorkload"
       EnableExecuteCommand: true
       LoadBalancers:
-        - TargetGroupArn: !Ref LoadBalancerTargetDemoApp
-          ContainerPort: !FindInMap [Config, Workload, ExternalPort]
-          ContainerName: kuma-dp
+        - TargetGroupArn: !Ref LoadBalancerTargetGateway
+          ContainerPort: 8080
+          ContainerName: gateway
       PropagateTags: SERVICE
-      Tags:
-        - Key: kuma.io/service
-          Value: !FindInMap [Config, Workload, Name]
       ServiceName: !FindInMap [Config, Workload, Name]
       NetworkConfiguration:
         AwsvpcConfiguration:
@@ -206,22 +197,10 @@ Resources:
       Cpu: 256
       Memory: 512
       ContainerDefinitions:
-        - Name: workload
-          Essential: true
-          Image: !FindInMap [Config, Workload, Image]
-          Environment:
-            - Name: KV_URL
-              Value: http://kv.mzms.mesh.local:15050
-          LogConfiguration:
-            LogDriver: awslogs
-            Options:
-              awslogs-group: !Ref AWS::StackName
-              awslogs-region: !Ref AWS::Region
-              awslogs-stream-prefix: workload
-        - Name: kuma-dp
+        - Name: gateway
           Image: !Ref SidecarImage
           PortMappings:
-            - ContainerPort: !FindInMap [Config, Workload, ExternalPort]
+            - ContainerPort: 8080
               Protocol: tcp
           Essential: true
           User: "5678"
@@ -248,21 +227,10 @@ Resources:
                 - dpname=`hostname -s`
                 - --dataplane-var
                 - address=`hostname -i`
-                - --dataplane-var
-                - !Join ["=", [mesh, !FindInMap [Config, Sidecar, Mesh]]]
-                - --dataplane-var
-                - !Join ["=", [port, !FindInMap [Config, Workload, ExternalPort]]]
-                - --dataplane-var
-                - !Join ["=", [servicePort, !FindInMap [Config, Workload, Port]]]
-                - --dataplane-var
-                - !Join ["=", [service, !FindInMap [Config, Workload, Name]]]
-                - --dataplane-var
-                - !Join ["=", [protocol, http]]
                 - --auth-type=aws
-                - --bind-outbounds
           LogConfiguration:
             LogDriver: awslogs
             Options:
               awslogs-group: !Ref AWS::StackName
               awslogs-region: !Ref AWS::Region
-              awslogs-stream-prefix: kuma-dp
+              awslogs-stream-prefix: edge-gateway

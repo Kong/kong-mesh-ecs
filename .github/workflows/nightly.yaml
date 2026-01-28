@@ -447,14 +447,9 @@ jobs:
 
           echo "Set zone name for us-west-1"
           http --ignore-stdin --check-status POST http://${{ needs.deploy-zone-east.outputs.cp-addr }}:8080/west/kv/key-value/zone value=us-west-1
-      - uses: nick-fields/retry@ce71cc2ab81d554ebbe88c79ab5975992d79ba08 # v3.0.2
-        name: Testing cross-zone routing via zone ingress...
-        id: retry
-        with:
-          max_attempts: 5
-          retry_wait_seconds: 15s
-          timeout_minutes: 30
-          command: |
+      - name: Test cross-zone routing via ingress
+        run: |
+          run_tests() {
             echo "Testing cross-zone routing via zone ingress..."
             echo ""
 
@@ -470,7 +465,7 @@ jobs:
 
             if [ "$WEST_ZONE" != "us-west-1" ]; then
               echo "✗ FAILURE: Expected zone 'us-west-1' but got '$WEST_ZONE'"
-              exit 1
+              return 1
             fi
             echo "✓ West zone routing correct"
             echo ""
@@ -488,7 +483,7 @@ jobs:
 
             if [ "$EAST_ZONE" != "us-west-1" ]; then
               echo "✗ FAILURE: Expected zone 'us-west-1' but got '$EAST_ZONE'"
-              exit 1
+              return 1
             fi
             echo "✓ East zone routing correct"
             echo ""
@@ -501,7 +496,7 @@ jobs:
             echo "Counter after increment in West: $WEST_NEW_COUNTER"
             if [ "$WEST_NEW_COUNTER" -le "$WEST_COUNTER" ]; then
               echo "✗ FAILURE: Counter did not increment in West zone (was $WEST_COUNTER, now $WEST_NEW_COUNTER)"
-              exit 1
+              return 1
             fi
             echo "✓ West zone increment successful ($WEST_COUNTER → $WEST_NEW_COUNTER)"
             echo ""
@@ -514,7 +509,7 @@ jobs:
             echo "Counter after increment in East: $EAST_NEW_COUNTER"
             if [ "$EAST_NEW_COUNTER" -le "$EAST_COUNTER" ]; then
               echo "✗ FAILURE: Counter did not increment in East zone (was $EAST_COUNTER, now $EAST_NEW_COUNTER)"
-              exit 1
+              return 1
             fi
             echo "✓ East zone increment successful ($EAST_COUNTER → $EAST_NEW_COUNTER)"
             echo ""
@@ -522,6 +517,23 @@ jobs:
             echo "=== Cross-Zone Routing Test Summary ==="
             echo "✓ Counter increment works in both zones"
             echo "✓ SUCCESS: All cross-zone routing tests passed"
+            return 0
+          }
+
+          MAX_ATTEMPTS=5
+          RETRY_WAIT=15
+          for attempt in $(seq 1 $MAX_ATTEMPTS); do
+            echo "=== Attempt $attempt/$MAX_ATTEMPTS ==="
+            if run_tests; then
+              exit 0
+            fi
+            if [ $attempt -lt $MAX_ATTEMPTS ]; then
+              echo "Test failed, retrying in ${RETRY_WAIT}s..."
+              sleep $RETRY_WAIT
+            fi
+          done
+          echo "All $MAX_ATTEMPTS attempts failed"
+          exit 1
 
   # The only resource that is needed to be removed is a HostnameGenerator since we cannot remove Route53 if we won't remove entries
   cleanup-policies:

@@ -447,75 +447,81 @@ jobs:
 
           echo "Set zone name for us-west-1"
           http --ignore-stdin --check-status POST http://${{ needs.deploy-zone-east.outputs.cp-addr }}:8080/west/kv/key-value/zone value=us-west-1
-      - name: Test cross-zone routing via ingress
-        run: |
-          echo "Testing cross-zone routing via zone ingress..."
-          echo ""
+      - uses: nick-fields/retry@ce71cc2ab81d554ebbe88c79ab5975992d79ba08 # v3.0.2
+        name: Testing cross-zone routing via zone ingress...
+        id: retry
+        with:
+          max_attempts: 5
+          retry_wait_seconds: 15s
+          timeout_minutes: 30
+          command: |
+            echo "Testing cross-zone routing via zone ingress..."
+            echo ""
 
-          # Test West zone endpoint
-          echo "=== Testing /west/demo-app/api/counter ==="
-          WEST_RESPONSE=$(http --ignore-stdin GET http://${{ needs.deploy-zone-east.outputs.cp-addr }}:8080/west/demo-app/api/counter)
-          WEST_ZONE=$(echo "$WEST_RESPONSE" | jq -r '.zone // "unknown"')
-          WEST_COUNTER=$(echo "$WEST_RESPONSE" | jq -r '.counter // 0')
+            # Test West zone endpoint
+            echo "=== Testing /west/demo-app/api/counter ==="
+            WEST_RESPONSE=$(http --ignore-stdin GET http://${{ needs.deploy-zone-east.outputs.cp-addr }}:8080/west/demo-app/api/counter)
+            WEST_ZONE=$(echo "$WEST_RESPONSE" | jq -r '.zone // "unknown"')
+            WEST_COUNTER=$(echo "$WEST_RESPONSE" | jq -r '.counter // 0')
 
-          echo "Response from /west endpoint:"
-          echo "  Zone: $WEST_ZONE"
-          echo "  Counter: $WEST_COUNTER"
+            echo "Response from /west endpoint:"
+            echo "  Zone: $WEST_ZONE"
+            echo "  Counter: $WEST_COUNTER"
 
-          if [ "$WEST_ZONE" != "us-west-1" ]; then
-            echo "✗ FAILURE: Expected zone 'us-west-1' but got '$WEST_ZONE'"
-            exit 1
-          fi
-          echo "✓ West zone routing correct"
-          echo ""
+            if [ "$WEST_ZONE" != "us-west-1" ]; then
+              echo "✗ FAILURE: Expected zone 'us-west-1' but got '$WEST_ZONE'"
+              exit 1
+            fi
+            echo "✓ West zone routing correct"
+            echo ""
 
-          # Test East zone endpoint
-          # This endpoint uses MeshMultiZoneService to the KV which is deployed only in the west zone
-          echo "=== Testing /east/demo-app/api/counter ==="
-          EAST_RESPONSE=$(http --ignore-stdin GET http://${{ needs.deploy-zone-east.outputs.cp-addr }}:8080/east/demo-app/api/counter)
-          EAST_ZONE=$(echo "$EAST_RESPONSE" | jq -r '.zone // "unknown"')
-          EAST_COUNTER=$(echo "$EAST_RESPONSE" | jq -r '.counter // 0')
+            # Test East zone endpoint
+            # This endpoint uses MeshMultiZoneService to the KV which is deployed only in the west zone
+            echo "=== Testing /east/demo-app/api/counter ==="
+            EAST_RESPONSE=$(http --ignore-stdin GET http://${{ needs.deploy-zone-east.outputs.cp-addr }}:8080/east/demo-app/api/counter)
+            EAST_ZONE=$(echo "$EAST_RESPONSE" | jq -r '.zone // "unknown"')
+            EAST_COUNTER=$(echo "$EAST_RESPONSE" | jq -r '.counter // 0')
 
-          echo "Response from /east endpoint:"
-          echo "  Zone: $EAST_ZONE"
-          echo "  Counter: $EAST_COUNTER"
+            echo "Response from /east endpoint:"
+            echo "  Zone: $EAST_ZONE"
+            echo "  Counter: $EAST_COUNTER"
 
-          if [ "$EAST_ZONE" != "us-west-1" ]; then
-            echo "✗ FAILURE: Expected zone 'us-west-1' but got '$EAST_ZONE'"
-            exit 1
-          fi
-          echo "✓ East zone routing correct"
-          echo ""
+            if [ "$EAST_ZONE" != "us-west-1" ]; then
+              echo "✗ FAILURE: Expected zone 'us-west-1' but got '$EAST_ZONE'"
+              exit 1
+            fi
+            echo "✓ East zone routing correct"
+            echo ""
 
-          # Test increment in West zone
-          echo "=== Testing POST /west/demo-app/api/counter ==="
-          WEST_INC_RESPONSE=$(http --ignore-stdin POST http://${{ needs.deploy-zone-east.outputs.cp-addr }}:8080/west/demo-app/api/counter)
-          WEST_NEW_COUNTER=$(echo "$WEST_INC_RESPONSE" | jq -r '.counter // 0')
+            # Test increment in West zone
+            echo "=== Testing POST /west/demo-app/api/counter ==="
+            WEST_INC_RESPONSE=$(http --ignore-stdin POST http://${{ needs.deploy-zone-east.outputs.cp-addr }}:8080/west/demo-app/api/counter)
+            WEST_NEW_COUNTER=$(echo "$WEST_INC_RESPONSE" | jq -r '.counter // 0')
 
-          echo "Counter after increment in West: $WEST_NEW_COUNTER"
-          if [ "$WEST_NEW_COUNTER" -le "$WEST_COUNTER" ]; then
-            echo "✗ FAILURE: Counter did not increment in West zone (was $WEST_COUNTER, now $WEST_NEW_COUNTER)"
-            exit 1
-          fi
-          echo "✓ West zone increment successful ($WEST_COUNTER → $WEST_NEW_COUNTER)"
-          echo ""
+            echo "Counter after increment in West: $WEST_NEW_COUNTER"
+            if [ "$WEST_NEW_COUNTER" -le "$WEST_COUNTER" ]; then
+              echo "✗ FAILURE: Counter did not increment in West zone (was $WEST_COUNTER, now $WEST_NEW_COUNTER)"
+              exit 1
+            fi
+            echo "✓ West zone increment successful ($WEST_COUNTER → $WEST_NEW_COUNTER)"
+            echo ""
 
-          # Test increment in East zone
-          echo "=== Testing POST /east/demo-app/api/counter ==="
-          EAST_INC_RESPONSE=$(http --ignore-stdin POST http://${{ needs.deploy-zone-east.outputs.cp-addr }}:8080/east/demo-app/api/counter)
-          EAST_NEW_COUNTER=$(echo "$EAST_INC_RESPONSE" | jq -r '.counter // 0')
+            # Test increment in East zone
+            echo "=== Testing POST /east/demo-app/api/counter ==="
+            EAST_INC_RESPONSE=$(http --ignore-stdin POST http://${{ needs.deploy-zone-east.outputs.cp-addr }}:8080/east/demo-app/api/counter)
+            EAST_NEW_COUNTER=$(echo "$EAST_INC_RESPONSE" | jq -r '.counter // 0')
 
-          echo "Counter after increment in East: $EAST_NEW_COUNTER"
-          if [ "$EAST_NEW_COUNTER" -le "$EAST_COUNTER" ]; then
-            echo "✗ FAILURE: Counter did not increment in East zone (was $EAST_COUNTER, now $EAST_NEW_COUNTER)"
-            exit 1
-          fi
-          echo "✓ East zone increment successful ($EAST_COUNTER → $EAST_NEW_COUNTER)"
-          echo ""
+            echo "Counter after increment in East: $EAST_NEW_COUNTER"
+            if [ "$EAST_NEW_COUNTER" -le "$EAST_COUNTER" ]; then
+              echo "✗ FAILURE: Counter did not increment in East zone (was $EAST_COUNTER, now $EAST_NEW_COUNTER)"
+              exit 1
+            fi
+            echo "✓ East zone increment successful ($EAST_COUNTER → $EAST_NEW_COUNTER)"
+            echo ""
 
-          echo "=== Cross-Zone Routing Test Summary ==="
-          echo "✓ Counter increment works in both zones"
-          echo "✓ SUCCESS: All cross-zone routing tests passed"
+            echo "=== Cross-Zone Routing Test Summary ==="
+            echo "✓ Counter increment works in both zones"
+            echo "✓ SUCCESS: All cross-zone routing tests passed"
 
   # The only resource that is needed to be removed is a HostnameGenerator since we cannot remove Route53 if we won't remove entries
   cleanup-policies:

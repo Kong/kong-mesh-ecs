@@ -63,7 +63,7 @@ spec:
             urlRewrite:
               path:
                 type: ReplacePrefixMatch
-                replacePrefixMatch: /api
+                replacePrefixMatch: /
         backendRefs:
         - kind: MeshService
           labels:

@@ -450,7 +450,7 @@ jobs:
           RETRY_WAIT=15
           for attempt in $(seq 1 $MAX_ATTEMPTS); do
             echo "=== Attempt $attempt/$MAX_ATTEMPTS ==="
-            if http --ignore-stdin --check-status POST http://${{ needs.deploy-zone-east.outputs.cp-addr }}:8080/west/kv/key-value/zone value=us-west-1; then
+            if http --ignore-stdin --check-status POST http://${{ needs.deploy-zone-east.outputs.cp-addr }}:8080/west/kv/api/key-value/zone value=us-west-1; then
               echo "✓ Zone name set successfully"
               break
             fi
@@ -535,8 +535,8 @@ jobs:
             return 0
           }
 
-          MAX_ATTEMPTS=5
-          RETRY_WAIT=15
+          MAX_ATTEMPTS=10
+          RETRY_WAIT=60
           for attempt in $(seq 1 $MAX_ATTEMPTS); do
             echo "=== Attempt $attempt/$MAX_ATTEMPTS ==="
             if run_tests; then

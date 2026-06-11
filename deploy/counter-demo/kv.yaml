@@ -28,6 +28,8 @@ Mappings:
         type: Dataplane
         name: "{{ dpname }}"
         mesh: "{{ mesh }}"
+        labels:
+          kuma.io/workload: "{{ service }}"
         networking:
           address: "{{ address }}"
           inbound:
@@ -119,6 +121,8 @@ Resources:
         - Key: kuma.io/mesh
           Value: default
         - Key: kuma.io/service
+          Value: !FindInMap [Config, Workload, Name]
+        - Key: kuma.io/workload
           Value: !FindInMap [Config, Workload, Name]
 
   LogGroup:

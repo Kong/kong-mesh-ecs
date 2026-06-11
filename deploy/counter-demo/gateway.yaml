@@ -33,6 +33,8 @@ Mappings:
         type: Dataplane
         name: "{{ dpname }}"
         mesh: default
+        labels:
+          kuma.io/workload: edge-gateway
         networking:
           address: "{{ address }}"
           gateway:
@@ -128,6 +130,8 @@ Resources:
         - Key: kuma.io/mesh
           Value: default
         - Key: kuma.io/service
+          Value: !FindInMap [Config, Workload, Name]
+        - Key: kuma.io/workload
           Value: !FindInMap [Config, Workload, Name]
 
   LogGroup:

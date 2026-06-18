@@ -323,6 +323,26 @@ jobs:
               VPCStackName=${{ env.stack-prefix }}-vpc \
               CPStackName=${{ env.stack-prefix }}-cp \
             --template-file deploy/counter-demo/demo-app.yaml
+      # The gateway dataplane's :8080 listener is created by the MeshGateway
+      # policy. It must exist on the control plane before the gateway ECS
+      # service starts, otherwise the ELB health check on :8080 never passes,
+      # the service never reaches steady state and the stack deploy hangs until
+      # the job timeout. Apply it here instead of relying on a MeshGateway left
+      # over on the global CP from a previous run.
+      - name: Configure kumactl for Konnect
+        env:
+          konnect_token: ${{ secrets.KONNECT_CP_KPAT }}
+          konnect_cp_id: ${{ secrets.KONNECT_CP_ID }}
+        run: |
+          kumactl config control-planes add \
+            --address=https://us.api.konghq.com/v1/mesh/control-planes/${konnect_cp_id}/api \
+            --headers "authorization=Bearer ${konnect_token}" \
+            --name "konnect_ecs-global_us" \
+            --overwrite
+      - name: Apply gateway policies before provisioning gateway
+        run: |
+          kumactl apply -f resources/mesh.yaml
+          kumactl apply -f resources/meshgateway.yaml
       - name: Provision gateway
         run: |
           aws cloudformation deploy \
@@ -591,11 +611,12 @@ jobs:
             --name "konnect_ecs-global_us" \
             --overwrite
       - name: Cleanup HostnameGenerator
+        # Tolerate missing generators: if a deploy failed before policies were
+        # applied there is nothing to delete, and cleanup must not fail the run.
         run: |
-          kumactl delete hostnamegenerator mzms-hostnames
-          kumactl delete hostnamegenerator ms-local-hostnames
-          kumactl delete hostnamegenerator ms-synced-hostnames
-          kumactl delete hostnamegenerator mes-hostnames
+          for hg in mzms-hostnames ms-local-hostnames ms-synced-hostnames mes-hostnames; do
+            kumactl delete hostnamegenerator "${hg}" || true
+          done
 
   teardown:
     timeout-minutes: 30

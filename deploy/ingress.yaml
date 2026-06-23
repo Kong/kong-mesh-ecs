@@ -31,6 +31,8 @@ Mappings:
         ---
         type: ZoneIngress
         name: "{{ dpname }}"
+        labels:
+          kuma.io/workload: ingress
         networking:
           address: "{{ address }}"
           port: 10001
@@ -121,6 +123,8 @@ Resources:
               Resource: "*"
       Tags:
         - Key: kuma.io/type
+          Value: ingress
+        - Key: kuma.io/workload
           Value: ingress
 
   LogGroup:

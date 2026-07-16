@@ -85,6 +85,25 @@ jobs:
       - name: Provision VPC
         id: vpc
         run: |
+          # A previous run may have left the stack in a state that
+          # `aws cloudformation deploy` can't recover from (e.g. a failed
+          # create rolls back to ROLLBACK_COMPLETE, which can't be updated).
+          # Delete it first so we start from a clean create.
+          status=$(
+            aws cloudformation describe-stacks --stack-name ${{ env.stack-prefix}}-vpc \
+              --query 'Stacks[0].StackStatus' --output text 2>/dev/null || echo MISSING
+          )
+          case "${status}" in
+            ROLLBACK_COMPLETE|ROLLBACK_FAILED|CREATE_FAILED|DELETE_FAILED|UPDATE_ROLLBACK_FAILED)
+              echo "VPC stack is in ${status}, deleting before redeploy..."
+              aws cloudformation delete-stack \
+                --stack-name ${{ env.stack-prefix}}-vpc \
+                --deletion-mode FORCE_DELETE_STACK
+              aws cloudformation wait stack-delete-complete \
+                --stack-name ${{ env.stack-prefix}}-vpc
+              ;;
+          esac
+
           aws cloudformation deploy \
             --capabilities CAPABILITY_IAM \
             --stack-name ${{ env.stack-prefix}}-vpc \
@@ -232,6 +251,25 @@ jobs:
       - name: Provision VPC
         id: vpc
         run: |
+          # A previous run may have left the stack in a state that
+          # `aws cloudformation deploy` can't recover from (e.g. a failed
+          # create rolls back to ROLLBACK_COMPLETE, which can't be updated).
+          # Delete it first so we start from a clean create.
+          status=$(
+            aws cloudformation describe-stacks --stack-name ${{ env.stack-prefix}}-vpc \
+              --query 'Stacks[0].StackStatus' --output text 2>/dev/null || echo MISSING
+          )
+          case "${status}" in
+            ROLLBACK_COMPLETE|ROLLBACK_FAILED|CREATE_FAILED|DELETE_FAILED|UPDATE_ROLLBACK_FAILED)
+              echo "VPC stack is in ${status}, deleting before redeploy..."
+              aws cloudformation delete-stack \
+                --stack-name ${{ env.stack-prefix}}-vpc \
+                --deletion-mode FORCE_DELETE_STACK
+              aws cloudformation wait stack-delete-complete \
+                --stack-name ${{ env.stack-prefix}}-vpc
+              ;;
+          esac
+
           aws cloudformation deploy \
             --capabilities CAPABILITY_IAM \
             --stack-name ${{ env.stack-prefix}}-vpc \
@@ -678,11 +716,22 @@ jobs:
           aws cloudformation wait stack-delete-complete \
             --stack-name ${{ env.stack-prefix}}-cp
 
-          aws secretsmanager delete-secret --secret-id ${{ matrix.region.tls-key-secret }}
-          aws secretsmanager delete-secret --secret-id ${{ matrix.region.tls-cert-secret }}
-          aws secretsmanager delete-secret --secret-id ${{ matrix.region.license-secret }}
-          aws secretsmanager delete-secret --secret-id ${{ matrix.region.cp-token-secret }}
+          # These IDs come from the deploy job's outputs, which are empty when
+          # the deploy failed before creating the secrets. Skip empty values so
+          # an empty --secret-id doesn't fail the step and skip VPC teardown.
+          for secret in \
+            "${{ matrix.region.tls-key-secret }}" \
+            "${{ matrix.region.tls-cert-secret }}" \
+            "${{ matrix.region.license-secret }}" \
+            "${{ matrix.region.cp-token-secret }}"; do
+            if [ -n "${secret}" ]; then
+              aws secretsmanager delete-secret --secret-id "${secret}" || true
+            fi
+          done
       - name: Deprovision VPC
+        # Always tear down the VPC, even if control-plane deprovision failed,
+        # so a broken VPC stack can't survive and block the next run's create.
+        if: always()
         run: |
           echo "Attempting to delete VPC stack..."
           if ! aws cloudformation delete-stack --stack-name ${{ env.stack-prefix}}-vpc; then

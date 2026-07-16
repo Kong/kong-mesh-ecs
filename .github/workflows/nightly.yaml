@@ -96,9 +96,13 @@ jobs:
           case "${status}" in
             ROLLBACK_COMPLETE|ROLLBACK_FAILED|CREATE_FAILED|DELETE_FAILED|UPDATE_ROLLBACK_FAILED)
               echo "VPC stack is in ${status}, deleting before redeploy..."
-              aws cloudformation delete-stack \
-                --stack-name ${{ env.stack-prefix}}-vpc \
-                --deletion-mode FORCE_DELETE_STACK
+              # FORCE_DELETE_STACK is only valid from DELETE_FAILED, so try a
+              # plain delete first and only force if that fails.
+              if ! aws cloudformation delete-stack --stack-name ${{ env.stack-prefix}}-vpc; then
+                aws cloudformation delete-stack \
+                  --stack-name ${{ env.stack-prefix}}-vpc \
+                  --deletion-mode FORCE_DELETE_STACK
+              fi
               aws cloudformation wait stack-delete-complete \
                 --stack-name ${{ env.stack-prefix}}-vpc
               ;;
@@ -262,9 +266,13 @@ jobs:
           case "${status}" in
             ROLLBACK_COMPLETE|ROLLBACK_FAILED|CREATE_FAILED|DELETE_FAILED|UPDATE_ROLLBACK_FAILED)
               echo "VPC stack is in ${status}, deleting before redeploy..."
-              aws cloudformation delete-stack \
-                --stack-name ${{ env.stack-prefix}}-vpc \
-                --deletion-mode FORCE_DELETE_STACK
+              # FORCE_DELETE_STACK is only valid from DELETE_FAILED, so try a
+              # plain delete first and only force if that fails.
+              if ! aws cloudformation delete-stack --stack-name ${{ env.stack-prefix}}-vpc; then
+                aws cloudformation delete-stack \
+                  --stack-name ${{ env.stack-prefix}}-vpc \
+                  --deletion-mode FORCE_DELETE_STACK
+              fi
               aws cloudformation wait stack-delete-complete \
                 --stack-name ${{ env.stack-prefix}}-vpc
               ;;

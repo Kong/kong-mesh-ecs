@@ -1,5 +1,5 @@
 name: "Nightly Kong Mesh on ECS Multizone"
-run-name: "Nightly Kong Mesh Multizone on ECS - ${{ inputs.version || 'preview' }}"
+run-name: "Nightly Kong Mesh Multizone on ECS - ${{ inputs.version || '2.14 preview' }}"
 
 concurrency:
   group: ${{github.workflow}}
@@ -8,7 +8,7 @@ on:
   workflow_dispatch:
     inputs:
       version:
-        description: Kong Mesh version to build (same format as installer.sh). Otherwise latest preview is used.
+        description: Kong Mesh version to build (same format as installer.sh). Otherwise the latest preview of the pinned release branch is used.
         type: string
       skip-cleanup:
         description: Skip resource cleanup
@@ -23,6 +23,10 @@ on:
 env:
   stack-prefix: ecs-ci
   unique-id: ${{ github.run_number }}_${{ github.run_attempt}}
+  # Release branch the nightly tracks. `VERSION=preview` in installer.sh always
+  # resolves to master (it queries `0.0.0-preview`), which drifts ahead of the
+  # Konnect global CP and makes the zones NACK policies over KDS.
+  mesh-release: "2.14"
 
 permissions:
   id-token: write
@@ -75,7 +79,9 @@ jobs:
         run: |
           version="${{ inputs.version }}"
           if [[ -z "${version}" ]] || [[ "${version}" == "preview" ]]; then
-            version=$(curl --silent -L https://docs.konghq.com/mesh/installer.sh  | VERSION=preview sh -s - --print-version | tail -n1)
+            version=$(curl --silent \
+              --url "https://api.cloudsmith.io/v1/packages/kong/kong-mesh-binaries-preview/?page=1&page_size=1&query=filename%3A${{ env.mesh-release }}&sort=-date" \
+              --header 'accept: application/json' | jq -r '.[0].version')
           fi
           echo "version=${version}" >> $GITHUB_OUTPUT
       - name: Install kumactl
@@ -222,7 +228,9 @@ jobs:
         run: |
           version="${{ inputs.version }}"
           if [[ -z "${version}" ]] || [[ "${version}" == "preview" ]]; then
-            version=$(curl --silent -L https://docs.konghq.com/mesh/installer.sh  | VERSION=preview sh -s - --print-version | tail -n1)
+            version=$(curl --silent \
+              --url "https://api.cloudsmith.io/v1/packages/kong/kong-mesh-binaries-preview/?page=1&page_size=1&query=filename%3A${{ env.mesh-release }}&sort=-date" \
+              --header 'accept: application/json' | jq -r '.[0].version')
           fi
           echo "version=${version}" >> $GITHUB_OUTPUT
       - name: Install kumactl
@@ -358,7 +366,9 @@ jobs:
         run: |
           version="${{ inputs.version }}"
           if [[ -z "${version}" ]] || [[ "${version}" == "preview" ]]; then
-            version=$(curl --silent -L https://docs.konghq.com/mesh/installer.sh  | VERSION=preview sh -s - --print-version | tail -n1)
+            version=$(curl --silent \
+              --url "https://api.cloudsmith.io/v1/packages/kong/kong-mesh-binaries-preview/?page=1&page_size=1&query=filename%3A${{ env.mesh-release }}&sort=-date" \
+              --header 'accept: application/json' | jq -r '.[0].version')
           fi
           echo "version=${version}" >> $GITHUB_OUTPUT
       - name: Install kumactl
@@ -573,7 +583,9 @@ jobs:
         run: |
           version="${{ inputs.version }}"
           if [[ -z "${version}" ]] || [[ "${version}" == "preview" ]]; then
-            version=$(curl --silent -L https://docs.konghq.com/mesh/installer.sh  | VERSION=preview sh -s - --print-version | tail -n1)
+            version=$(curl --silent \
+              --url "https://api.cloudsmith.io/v1/packages/kong/kong-mesh-binaries-preview/?page=1&page_size=1&query=filename%3A${{ env.mesh-release }}&sort=-date" \
+              --header 'accept: application/json' | jq -r '.[0].version')
           fi
           echo "version=${version}" >> $GITHUB_OUTPUT
       - name: Install kumactl

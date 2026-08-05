@@ -79,9 +79,17 @@ jobs:
         run: |
           version="${{ inputs.version }}"
           if [[ -z "${version}" ]] || [[ "${version}" == "preview" ]]; then
+            # Cloudsmith `query` is a loose substring match: filtering on the
+            # release alone also matches builds like 2.12.14, so filter locally.
             version=$(curl --silent \
-              --url "https://api.cloudsmith.io/v1/packages/kong/kong-mesh-binaries-preview/?page=1&page_size=1&query=filename%3A${{ env.mesh-release }}&sort=-date" \
-              --header 'accept: application/json' | jq -r '.[0].version')
+              --url "https://api.cloudsmith.io/v1/packages/kong/kong-mesh-binaries-preview/?page=1&page_size=100&query=filename%3Alinux-amd64&sort=-date" \
+              --header 'accept: application/json' \
+              | jq -r --arg rel "${{ env.mesh-release }}." \
+                'map(select(.version | startswith($rel))) | .[0].version // empty')
+            if [[ -z "${version}" ]]; then
+              echo "::error::no ${{ env.mesh-release }} preview found in Cloudsmith"
+              exit 1
+            fi
           fi
           echo "version=${version}" >> $GITHUB_OUTPUT
       - name: Install kumactl
@@ -251,9 +259,17 @@ jobs:
         run: |
           version="${{ inputs.version }}"
           if [[ -z "${version}" ]] || [[ "${version}" == "preview" ]]; then
+            # Cloudsmith `query` is a loose substring match: filtering on the
+            # release alone also matches builds like 2.12.14, so filter locally.
             version=$(curl --silent \
-              --url "https://api.cloudsmith.io/v1/packages/kong/kong-mesh-binaries-preview/?page=1&page_size=1&query=filename%3A${{ env.mesh-release }}&sort=-date" \
-              --header 'accept: application/json' | jq -r '.[0].version')
+              --url "https://api.cloudsmith.io/v1/packages/kong/kong-mesh-binaries-preview/?page=1&page_size=100&query=filename%3Alinux-amd64&sort=-date" \
+              --header 'accept: application/json' \
+              | jq -r --arg rel "${{ env.mesh-release }}." \
+                'map(select(.version | startswith($rel))) | .[0].version // empty')
+            if [[ -z "${version}" ]]; then
+              echo "::error::no ${{ env.mesh-release }} preview found in Cloudsmith"
+              exit 1
+            fi
           fi
           echo "version=${version}" >> $GITHUB_OUTPUT
       - name: Install kumactl
@@ -432,9 +448,17 @@ jobs:
         run: |
           version="${{ inputs.version }}"
           if [[ -z "${version}" ]] || [[ "${version}" == "preview" ]]; then
+            # Cloudsmith `query` is a loose substring match: filtering on the
+            # release alone also matches builds like 2.12.14, so filter locally.
             version=$(curl --silent \
-              --url "https://api.cloudsmith.io/v1/packages/kong/kong-mesh-binaries-preview/?page=1&page_size=1&query=filename%3A${{ env.mesh-release }}&sort=-date" \
-              --header 'accept: application/json' | jq -r '.[0].version')
+              --url "https://api.cloudsmith.io/v1/packages/kong/kong-mesh-binaries-preview/?page=1&page_size=100&query=filename%3Alinux-amd64&sort=-date" \
+              --header 'accept: application/json' \
+              | jq -r --arg rel "${{ env.mesh-release }}." \
+                'map(select(.version | startswith($rel))) | .[0].version // empty')
+            if [[ -z "${version}" ]]; then
+              echo "::error::no ${{ env.mesh-release }} preview found in Cloudsmith"
+              exit 1
+            fi
           fi
           echo "version=${version}" >> $GITHUB_OUTPUT
       - name: Install kumactl
@@ -649,9 +673,17 @@ jobs:
         run: |
           version="${{ inputs.version }}"
           if [[ -z "${version}" ]] || [[ "${version}" == "preview" ]]; then
+            # Cloudsmith `query` is a loose substring match: filtering on the
+            # release alone also matches builds like 2.12.14, so filter locally.
             version=$(curl --silent \
-              --url "https://api.cloudsmith.io/v1/packages/kong/kong-mesh-binaries-preview/?page=1&page_size=1&query=filename%3A${{ env.mesh-release }}&sort=-date" \
-              --header 'accept: application/json' | jq -r '.[0].version')
+              --url "https://api.cloudsmith.io/v1/packages/kong/kong-mesh-binaries-preview/?page=1&page_size=100&query=filename%3Alinux-amd64&sort=-date" \
+              --header 'accept: application/json' \
+              | jq -r --arg rel "${{ env.mesh-release }}." \
+                'map(select(.version | startswith($rel))) | .[0].version // empty')
+            if [[ -z "${version}" ]]; then
+              echo "::error::no ${{ env.mesh-release }} preview found in Cloudsmith"
+              exit 1
+            fi
           fi
           echo "version=${version}" >> $GITHUB_OUTPUT
       - name: Install kumactl

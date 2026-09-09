@@ -1,5 +1,5 @@
 name: "Nightly Kong Mesh on ECS Multizone"
-run-name: "Nightly Kong Mesh Multizone on ECS - ${{ inputs.version || 'preview' }}"
+run-name: "Nightly Kong Mesh Multizone on ECS - ${{ inputs.version || '2.14 preview' }}"
 
 concurrency:
   group: ${{github.workflow}}
@@ -8,7 +8,7 @@ on:
   workflow_dispatch:
     inputs:
       version:
-        description: Kong Mesh version to build (same format as installer.sh). Otherwise latest preview is used.
+        description: Kong Mesh version to build (same format as installer.sh). Otherwise the latest preview of the pinned release branch is used.
         type: string
       skip-cleanup:
         description: Skip resource cleanup
@@ -23,6 +23,10 @@ on:
 env:
   stack-prefix: ecs-ci
   unique-id: ${{ github.run_number }}_${{ github.run_attempt}}
+  # Release branch the nightly tracks. `VERSION=preview` in installer.sh always
+  # resolves to master (it queries `0.0.0-preview`), which drifts ahead of the
+  # Konnect global CP and makes the zones NACK policies over KDS.
+  mesh-release: "2.14"
 
 permissions:
   id-token: write
@@ -56,9 +60,9 @@ jobs:
       hosted-zone-id: ${{ steps.vpc.outputs.hosted-zone-id }}
     steps:
       - name: Checkout
-        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
       - name: Configure AWS Credentials
-        uses: aws-actions/configure-aws-credentials@ec61189d14ec14c8efccab744f656cffd0e33f37 #v6.1.0
+        uses: aws-actions/configure-aws-credentials@e7f100cf4c008499ea8adda475de1042d6975c7b #v6.2.0
         with:
           role-to-assume: arn:aws:iam::${{ secrets.NIGHTLY_AWS_ACCOUNT_ID }}:role/ecs-ci
           aws-region: us-west-1
@@ -75,7 +79,17 @@ jobs:
         run: |
           version="${{ inputs.version }}"
           if [[ -z "${version}" ]] || [[ "${version}" == "preview" ]]; then
-            version=$(curl --silent -L https://docs.konghq.com/mesh/installer.sh  | VERSION=preview sh -s - --print-version | tail -n1)
+            # Cloudsmith `query` is a loose substring match: filtering on the
+            # release alone also matches builds like 2.12.14, so filter locally.
+            version=$(curl --silent \
+              --url "https://api.cloudsmith.io/v1/packages/kong/kong-mesh-binaries-preview/?page=1&page_size=100&query=filename%3Alinux-amd64&sort=-date" \
+              --header 'accept: application/json' \
+              | jq -r --arg rel "${{ env.mesh-release }}." \
+                'map(select(.version | startswith($rel))) | .[0].version // empty')
+            if [[ -z "${version}" ]]; then
+              echo "::error::no ${{ env.mesh-release }} preview found in Cloudsmith"
+              exit 1
+            fi
           fi
           echo "version=${version}" >> $GITHUB_OUTPUT
       - name: Install kumactl
@@ -85,6 +99,29 @@ jobs:
       - name: Provision VPC
         id: vpc
         run: |
+          # A previous run may have left the stack in a state that
+          # `aws cloudformation deploy` can't recover from (e.g. a failed
+          # create rolls back to ROLLBACK_COMPLETE, which can't be updated).
+          # Delete it first so we start from a clean create.
+          status=$(
+            aws cloudformation describe-stacks --stack-name ${{ env.stack-prefix}}-vpc \
+              --query 'Stacks[0].StackStatus' --output text 2>/dev/null || echo MISSING
+          )
+          case "${status}" in
+            ROLLBACK_COMPLETE|ROLLBACK_FAILED|CREATE_FAILED|DELETE_FAILED|UPDATE_ROLLBACK_FAILED)
+              echo "VPC stack is in ${status}, deleting before redeploy..."
+              # FORCE_DELETE_STACK is only valid from DELETE_FAILED, so try a
+              # plain delete first and only force if that fails.
+              if ! aws cloudformation delete-stack --stack-name ${{ env.stack-prefix}}-vpc; then
+                aws cloudformation delete-stack \
+                  --stack-name ${{ env.stack-prefix}}-vpc \
+                  --deletion-mode FORCE_DELETE_STACK
+              fi
+              aws cloudformation wait stack-delete-complete \
+                --stack-name ${{ env.stack-prefix}}-vpc
+              ;;
+          esac
+
           aws cloudformation deploy \
             --capabilities CAPABILITY_IAM \
             --stack-name ${{ env.stack-prefix}}-vpc \
@@ -203,9 +240,9 @@ jobs:
       hosted-zone-id: ${{ steps.vpc.outputs.hosted-zone-id }}
     steps:
       - name: Checkout
-        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
       - name: Configure AWS Credentials
-        uses: aws-actions/configure-aws-credentials@ec61189d14ec14c8efccab744f656cffd0e33f37 #v6.1.0
+        uses: aws-actions/configure-aws-credentials@e7f100cf4c008499ea8adda475de1042d6975c7b #v6.2.0
         with:
           role-to-assume: arn:aws:iam::${{ secrets.NIGHTLY_AWS_ACCOUNT_ID }}:role/ecs-ci
           aws-region: us-east-2
@@ -222,7 +259,17 @@ jobs:
         run: |
           version="${{ inputs.version }}"
           if [[ -z "${version}" ]] || [[ "${version}" == "preview" ]]; then
-            version=$(curl --silent -L https://docs.konghq.com/mesh/installer.sh  | VERSION=preview sh -s - --print-version | tail -n1)
+            # Cloudsmith `query` is a loose substring match: filtering on the
+            # release alone also matches builds like 2.12.14, so filter locally.
+            version=$(curl --silent \
+              --url "https://api.cloudsmith.io/v1/packages/kong/kong-mesh-binaries-preview/?page=1&page_size=100&query=filename%3Alinux-amd64&sort=-date" \
+              --header 'accept: application/json' \
+              | jq -r --arg rel "${{ env.mesh-release }}." \
+                'map(select(.version | startswith($rel))) | .[0].version // empty')
+            if [[ -z "${version}" ]]; then
+              echo "::error::no ${{ env.mesh-release }} preview found in Cloudsmith"
+              exit 1
+            fi
           fi
           echo "version=${version}" >> $GITHUB_OUTPUT
       - name: Install kumactl
@@ -232,6 +279,29 @@ jobs:
       - name: Provision VPC
         id: vpc
         run: |
+          # A previous run may have left the stack in a state that
+          # `aws cloudformation deploy` can't recover from (e.g. a failed
+          # create rolls back to ROLLBACK_COMPLETE, which can't be updated).
+          # Delete it first so we start from a clean create.
+          status=$(
+            aws cloudformation describe-stacks --stack-name ${{ env.stack-prefix}}-vpc \
+              --query 'Stacks[0].StackStatus' --output text 2>/dev/null || echo MISSING
+          )
+          case "${status}" in
+            ROLLBACK_COMPLETE|ROLLBACK_FAILED|CREATE_FAILED|DELETE_FAILED|UPDATE_ROLLBACK_FAILED)
+              echo "VPC stack is in ${status}, deleting before redeploy..."
+              # FORCE_DELETE_STACK is only valid from DELETE_FAILED, so try a
+              # plain delete first and only force if that fails.
+              if ! aws cloudformation delete-stack --stack-name ${{ env.stack-prefix}}-vpc; then
+                aws cloudformation delete-stack \
+                  --stack-name ${{ env.stack-prefix}}-vpc \
+                  --deletion-mode FORCE_DELETE_STACK
+              fi
+              aws cloudformation wait stack-delete-complete \
+                --stack-name ${{ env.stack-prefix}}-vpc
+              ;;
+          esac
+
           aws cloudformation deploy \
             --capabilities CAPABILITY_IAM \
             --stack-name ${{ env.stack-prefix}}-vpc \
@@ -323,6 +393,26 @@ jobs:
               VPCStackName=${{ env.stack-prefix }}-vpc \
               CPStackName=${{ env.stack-prefix }}-cp \
             --template-file deploy/counter-demo/demo-app.yaml
+      # The gateway dataplane's :8080 listener is created by the MeshGateway
+      # policy. It must exist on the control plane before the gateway ECS
+      # service starts, otherwise the ELB health check on :8080 never passes,
+      # the service never reaches steady state and the stack deploy hangs until
+      # the job timeout. Apply it here instead of relying on a MeshGateway left
+      # over on the global CP from a previous run.
+      - name: Configure kumactl for Konnect
+        env:
+          konnect_token: ${{ secrets.KONNECT_CP_KPAT }}
+          konnect_cp_id: ${{ secrets.KONNECT_CP_ID }}
+        run: |
+          kumactl config control-planes add \
+            --address=https://us.api.konghq.com/v1/mesh/control-planes/${konnect_cp_id}/api \
+            --headers "authorization=Bearer ${konnect_token}" \
+            --name "konnect_ecs-global_us" \
+            --overwrite
+      - name: Apply gateway policies before provisioning gateway
+        run: |
+          kumactl apply -f resources/mesh.yaml
+          kumactl apply -f resources/meshgateway.yaml
       - name: Provision gateway
         run: |
           aws cloudformation deploy \
@@ -344,7 +434,7 @@ jobs:
         shell: /usr/bin/bash -Eeuo pipefail {0}
     steps:
       - name: Checkout
-        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
       - name: Generate GitHub app token
         id: github-app-token
         uses: tibdex/github-app-token@3beb63f4bd073e61482598c45c71c1019b59b73a # v2.1.0
@@ -358,7 +448,17 @@ jobs:
         run: |
           version="${{ inputs.version }}"
           if [[ -z "${version}" ]] || [[ "${version}" == "preview" ]]; then
-            version=$(curl --silent -L https://docs.konghq.com/mesh/installer.sh  | VERSION=preview sh -s - --print-version | tail -n1)
+            # Cloudsmith `query` is a loose substring match: filtering on the
+            # release alone also matches builds like 2.12.14, so filter locally.
+            version=$(curl --silent \
+              --url "https://api.cloudsmith.io/v1/packages/kong/kong-mesh-binaries-preview/?page=1&page_size=100&query=filename%3Alinux-amd64&sort=-date" \
+              --header 'accept: application/json' \
+              | jq -r --arg rel "${{ env.mesh-release }}." \
+                'map(select(.version | startswith($rel))) | .[0].version // empty')
+            if [[ -z "${version}" ]]; then
+              echo "::error::no ${{ env.mesh-release }} preview found in Cloudsmith"
+              exit 1
+            fi
           fi
           echo "version=${version}" >> $GITHUB_OUTPUT
       - name: Install kumactl
@@ -420,7 +520,7 @@ jobs:
         shell: /usr/bin/bash -Eeuo pipefail {0}
     steps:
       - name: Checkout
-        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
       - name: Test west zone dataplanes
         run: |
           echo "Testing us-west-1 zone..."
@@ -559,7 +659,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
-        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
       - name: Generate GitHub app token
         id: github-app-token
         uses: tibdex/github-app-token@3beb63f4bd073e61482598c45c71c1019b59b73a # v2.1.0
@@ -573,7 +673,17 @@ jobs:
         run: |
           version="${{ inputs.version }}"
           if [[ -z "${version}" ]] || [[ "${version}" == "preview" ]]; then
-            version=$(curl --silent -L https://docs.konghq.com/mesh/installer.sh  | VERSION=preview sh -s - --print-version | tail -n1)
+            # Cloudsmith `query` is a loose substring match: filtering on the
+            # release alone also matches builds like 2.12.14, so filter locally.
+            version=$(curl --silent \
+              --url "https://api.cloudsmith.io/v1/packages/kong/kong-mesh-binaries-preview/?page=1&page_size=100&query=filename%3Alinux-amd64&sort=-date" \
+              --header 'accept: application/json' \
+              | jq -r --arg rel "${{ env.mesh-release }}." \
+                'map(select(.version | startswith($rel))) | .[0].version // empty')
+            if [[ -z "${version}" ]]; then
+              echo "::error::no ${{ env.mesh-release }} preview found in Cloudsmith"
+              exit 1
+            fi
           fi
           echo "version=${version}" >> $GITHUB_OUTPUT
       - name: Install kumactl
@@ -591,11 +701,12 @@ jobs:
             --name "konnect_ecs-global_us" \
             --overwrite
       - name: Cleanup HostnameGenerator
+        # Tolerate missing generators: if a deploy failed before policies were
+        # applied there is nothing to delete, and cleanup must not fail the run.
         run: |
-          kumactl delete hostnamegenerator mzms-hostnames
-          kumactl delete hostnamegenerator ms-local-hostnames
-          kumactl delete hostnamegenerator ms-synced-hostnames
-          kumactl delete hostnamegenerator mes-hostnames
+          for hg in mzms-hostnames ms-local-hostnames ms-synced-hostnames mes-hostnames; do
+            kumactl delete hostnamegenerator "${hg}" || true
+          done
 
   teardown:
     timeout-minutes: 30
@@ -618,9 +729,9 @@ jobs:
             cp-token-secret: ${{ needs.deploy-zone-east.outputs.cp-token-secret }}
     steps:
       - name: Checkout
-        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
       - name: Configure AWS Credentials
-        uses: aws-actions/configure-aws-credentials@ec61189d14ec14c8efccab744f656cffd0e33f37 #v6.1.0
+        uses: aws-actions/configure-aws-credentials@e7f100cf4c008499ea8adda475de1042d6975c7b #v6.2.0
         with:
           role-to-assume: arn:aws:iam::${{ secrets.NIGHTLY_AWS_ACCOUNT_ID }}:role/ecs-ci
           aws-region: ${{ matrix.region.aws-region }}
@@ -657,11 +768,22 @@ jobs:
           aws cloudformation wait stack-delete-complete \
             --stack-name ${{ env.stack-prefix}}-cp
 
-          aws secretsmanager delete-secret --secret-id ${{ matrix.region.tls-key-secret }}
-          aws secretsmanager delete-secret --secret-id ${{ matrix.region.tls-cert-secret }}
-          aws secretsmanager delete-secret --secret-id ${{ matrix.region.license-secret }}
-          aws secretsmanager delete-secret --secret-id ${{ matrix.region.cp-token-secret }}
+          # These IDs come from the deploy job's outputs, which are empty when
+          # the deploy failed before creating the secrets. Skip empty values so
+          # an empty --secret-id doesn't fail the step and skip VPC teardown.
+          for secret in \
+            "${{ matrix.region.tls-key-secret }}" \
+            "${{ matrix.region.tls-cert-secret }}" \
+            "${{ matrix.region.license-secret }}" \
+            "${{ matrix.region.cp-token-secret }}"; do
+            if [ -n "${secret}" ]; then
+              aws secretsmanager delete-secret --secret-id "${secret}" || true
+            fi
+          done
       - name: Deprovision VPC
+        # Always tear down the VPC, even if control-plane deprovision failed,
+        # so a broken VPC stack can't survive and block the next run's create.
+        if: always()
         run: |
           echo "Attempting to delete VPC stack..."
           if ! aws cloudformation delete-stack --stack-name ${{ env.stack-prefix}}-vpc; then

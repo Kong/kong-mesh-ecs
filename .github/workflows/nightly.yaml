@@ -62,7 +62,7 @@ jobs:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - name: Configure AWS Credentials
-        uses: aws-actions/configure-aws-credentials@e7f100cf4c008499ea8adda475de1042d6975c7b #v6.2.0
+        uses: aws-actions/configure-aws-credentials@cbe3b392738ccf3f987d68400dafcf4b0624a56c #v6.2.4
         with:
           role-to-assume: arn:aws:iam::${{ secrets.NIGHTLY_AWS_ACCOUNT_ID }}:role/ecs-ci
           aws-region: us-west-1
@@ -242,7 +242,7 @@ jobs:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - name: Configure AWS Credentials
-        uses: aws-actions/configure-aws-credentials@e7f100cf4c008499ea8adda475de1042d6975c7b #v6.2.0
+        uses: aws-actions/configure-aws-credentials@cbe3b392738ccf3f987d68400dafcf4b0624a56c #v6.2.4
         with:
           role-to-assume: arn:aws:iam::${{ secrets.NIGHTLY_AWS_ACCOUNT_ID }}:role/ecs-ci
           aws-region: us-east-2
@@ -731,7 +731,7 @@ jobs:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - name: Configure AWS Credentials
-        uses: aws-actions/configure-aws-credentials@e7f100cf4c008499ea8adda475de1042d6975c7b #v6.2.0
+        uses: aws-actions/configure-aws-credentials@cbe3b392738ccf3f987d68400dafcf4b0624a56c #v6.2.4
         with:
           role-to-assume: arn:aws:iam::${{ secrets.NIGHTLY_AWS_ACCOUNT_ID }}:role/ecs-ci
           aws-region: ${{ matrix.region.aws-region }}

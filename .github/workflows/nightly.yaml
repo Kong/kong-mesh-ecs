@@ -45,7 +45,7 @@ permissions:
 # connecting them to a global control plane on Konnect.
 jobs:
   deploy-zone-west:
-    timeout-minutes: 30
+    timeout-minutes: 45
     name: "Deploy Zone us-west-1"
     runs-on: ubuntu-latest
     defaults:
@@ -225,7 +225,7 @@ jobs:
             --template-file deploy/counter-demo/demo-app.yaml
 
   deploy-zone-east:
-    timeout-minutes: 30
+    timeout-minutes: 45
     name: "Deploy Zone us-east-2"
     runs-on: ubuntu-latest
     defaults:
@@ -709,7 +709,7 @@ jobs:
           done
 
   teardown:
-    timeout-minutes: 30
+    timeout-minutes: 45
     needs: [test, cleanup-policies, deploy-zone-west, deploy-zone-east]
     name: "Cleanup"
     if: 'always() && !inputs.skip-cleanup'

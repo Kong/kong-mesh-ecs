@@ -95,7 +95,7 @@
     },
     {
       "Effect": "Allow",
-      "Action": ["secretsmanager:DeleteSecret"],
+      "Action": ["secretsmanager:DeleteSecret", "secretsmanager:ListSecrets"],
       "Resource": "*"
     },
     {
